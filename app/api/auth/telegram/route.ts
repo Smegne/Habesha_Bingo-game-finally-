@@ -5,18 +5,18 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
-const JWT_SECRET = process.env.JWT_SECRET!;
+const JWT_SECRET = process.env.JWT_SECRET || 'habesha-bingo-secret-key-2024';
 
 // Validate Telegram WebApp initData
 function validateTelegramInitData(initData: string): boolean {
   try {
     console.log('Validating initData, length:', initData?.length);
     
+    if (!initData) return false;
+    
     // Parse the data
     const urlParams = new URLSearchParams(initData);
     const hash = urlParams.get('hash');
-    
-    console.log('Hash found:', !!hash);
     
     if (!hash) {
       console.error('No hash in initData');
@@ -34,8 +34,6 @@ function validateTelegramInitData(initData: string): boolean {
     dataCheckArr.sort();
     const dataCheckString = dataCheckArr.join('\n');
     
-    console.log('Data check string length:', dataCheckString.length);
-    
     // Calculate secret key
     const secretKey = crypto.createHmac('sha256', 'WebAppData')
       .update(BOT_TOKEN)
@@ -47,12 +45,85 @@ function validateTelegramInitData(initData: string): boolean {
       .update(dataCheckString)
       .digest('hex');
     
-    console.log('Hashes match?', calculatedHash === hash);
-    
     return calculatedHash === hash;
   } catch (error) {
     console.error('Telegram initData validation error:', error);
     return false;
+  }
+}
+
+// Helper function to find user by Telegram ID (handles all formats)
+async function findUserByTelegramId(telegramId: string) {
+  try {
+    console.log('🔍 Searching for Telegram ID:', telegramId);
+    
+    // METHOD 1: Try exact match in telegram_id
+    let result = await db.query(
+      'SELECT * FROM users WHERE telegram_id = ?',
+      [telegramId]
+    ) as any;
+    
+    if (result && Array.isArray(result) && result[0]) {
+      const [rows] = result;
+      if (Array.isArray(rows) && rows.length > 0) {
+        console.log('✅ Found user by exact telegram_id match');
+        return rows[0];
+      } else if (rows && typeof rows === 'object' && rows.id) {
+        console.log('✅ Found user by exact telegram_id match (single object)');
+        return rows;
+      }
+    }
+    
+    // METHOD 2: If telegramId is numeric, try with "user" prefix
+    if (/^\d+$/.test(telegramId)) {
+      const prefixedId = `user${telegramId}`;
+      console.log('🔍 Trying with user prefix:', prefixedId);
+      
+      result = await db.query(
+        'SELECT * FROM users WHERE telegram_id = ?',
+        [prefixedId]
+      ) as any;
+      
+      if (result && Array.isArray(result) && result[0]) {
+        const [rows] = result;
+        if (Array.isArray(rows) && rows.length > 0) {
+          console.log('✅ Found user by prefixed telegram_id');
+          return rows[0];
+        } else if (rows && typeof rows === 'object' && rows.id) {
+          console.log('✅ Found user by prefixed telegram_id (single object)');
+          return rows;
+        }
+      }
+    }
+    
+    // METHOD 3: Try telegram_user_id field (numeric)
+    const numericId = parseInt(telegramId);
+    if (!isNaN(numericId)) {
+      console.log('🔍 Trying telegram_user_id field:', numericId);
+      
+      result = await db.query(
+        'SELECT * FROM users WHERE telegram_user_id = ?',
+        [numericId]
+      ) as any;
+      
+      if (result && Array.isArray(result) && result[0]) {
+        const [rows] = result;
+        if (Array.isArray(rows) && rows.length > 0) {
+          console.log('✅ Found user by telegram_user_id');
+          return rows[0];
+        } else if (rows && typeof rows === 'object' && rows.id) {
+          console.log('✅ Found user by telegram_user_id (single object)');
+          return rows;
+        }
+      }
+    }
+    
+    console.log('❌ No user found for Telegram ID:', telegramId);
+    return null;
+    
+  } catch (error) {
+    console.error('❌ Error finding user by Telegram ID:', error);
+    return null;
   }
 }
 
@@ -64,7 +135,7 @@ function addCorsHeaders(response: NextResponse) {
   return response;
 }
 
-// Auto-login for Telegram users and web login
+// Main authentication handler
 export async function POST(request: NextRequest) {
   try {
     console.log('=== AUTH REQUEST START ===');
@@ -81,8 +152,6 @@ export async function POST(request: NextRequest) {
     } = body;
     
     console.log('Source:', source);
-    console.log('Has initData:', !!initData);
-    console.log('Has tgWebAppData:', !!tgWebAppData);
     
     // WEB LOGIN - Email/Username and Password
     if (source === 'web') {
@@ -101,52 +170,41 @@ export async function POST(request: NextRequest) {
 
       console.log('Web login attempt:', { loginIdentifier });
       
-      // Query database - check by email first, then by username
-      let user;
-      let queryResult;
+      // Query database
+      let user = null;
       
-      // Try to find by email (if it looks like an email)
+      // Try to find by email
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (emailRegex.test(loginIdentifier)) {
-        queryResult = await db.query(
+        const result = await db.query(
           'SELECT * FROM users WHERE email = ?',
           [loginIdentifier]
         ) as any;
-      }
-      
-      // If not found by email or not an email, try by username
-      let foundUser = false;
-      if (queryResult) {
-        if (Array.isArray(queryResult)) {
-          const [rows] = queryResult;
+        
+        if (result && Array.isArray(result) && result[0]) {
+          const [rows] = result;
           if (Array.isArray(rows) && rows.length > 0) {
             user = rows[0];
-            foundUser = true;
-          } else if (rows?.id) {
+          } else if (rows && rows.id) {
             user = rows;
-            foundUser = true;
           }
-        } else if (queryResult?.id) {
-          user = queryResult;
-          foundUser = true;
         }
       }
       
-      if (!foundUser) {
-        queryResult = await db.query(
+      // If not found by email, try by username
+      if (!user) {
+        const result = await db.query(
           'SELECT * FROM users WHERE username = ?',
           [loginIdentifier]
         ) as any;
         
-        if (Array.isArray(queryResult)) {
-          const [rows] = queryResult;
+        if (result && Array.isArray(result) && result[0]) {
+          const [rows] = result;
           if (Array.isArray(rows) && rows.length > 0) {
             user = rows[0];
-          } else if (rows?.id) {
+          } else if (rows && rows.id) {
             user = rows;
           }
-        } else if (queryResult?.id) {
-          user = queryResult;
         }
       }
       
@@ -190,15 +248,10 @@ export async function POST(request: NextRequest) {
       }
       
       // Update user's last active status
-      try {
-        await db.query(
-          'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE id = ?',
-          [user.id]
-        );
-        console.log('User online status updated');
-      } catch (updateError) {
-        console.warn('Failed to update user status:', updateError);
-      }
+      await db.query(
+        'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE id = ?',
+        [user.id]
+      );
       
       // Generate JWT token
       const token = jwt.sign(
@@ -224,9 +277,10 @@ export async function POST(request: NextRequest) {
           firstName: user.first_name,
           email: user.email,
           role: user.role,
-          balance: parseFloat(user.balance),
-          bonusBalance: parseFloat(user.bonus_balance),
+          balance: parseFloat(user.balance) || 0,
+          bonusBalance: parseFloat(user.bonus_balance) || 0,
           referralCode: user.referral_code,
+          isOnline: true,
           createdAt: user.created_at,
         },
         token,
@@ -236,26 +290,29 @@ export async function POST(request: NextRequest) {
       return addCorsHeaders(response);
     }
     
-    // TELEGRAM LOGIN - Original Telegram authentication
-    // Use whichever data we have
+    // TELEGRAM LOGIN
     const telegramData = initData || tgWebAppData;
     
     if (!telegramData) {
       console.error('No Telegram data provided');
       const response = NextResponse.json(
-        { error: 'No Telegram authentication data provided' },
+        { 
+          success: false,
+          error: 'No Telegram authentication data provided' 
+        },
         { status: 400 }
       );
       return addCorsHeaders(response);
     }
     
-    console.log('Telegram data length:', telegramData.length);
+    console.log('Telegram data received');
     
     // Validate Telegram data
     if (!validateTelegramInitData(telegramData)) {
       console.error('Telegram validation failed');
       const response = NextResponse.json(
         { 
+          success: false,
           error: 'Invalid Telegram authentication',
           details: 'Hash validation failed'
         },
@@ -270,12 +327,13 @@ export async function POST(request: NextRequest) {
     const urlParams = new URLSearchParams(telegramData);
     const userJson = urlParams.get('user');
     
-    console.log('User JSON exists:', !!userJson);
-    
     if (!userJson) {
       console.error('No user data in Telegram auth');
       const response = NextResponse.json(
-        { error: 'No user data in Telegram authentication' },
+        { 
+          success: false,
+          error: 'No user data in Telegram authentication' 
+        },
         { status: 400 }
       );
       return addCorsHeaders(response);
@@ -287,164 +345,104 @@ export async function POST(request: NextRequest) {
     } catch (e) {
       console.error('Failed to parse user JSON:', e);
       const response = NextResponse.json(
-        { error: 'Invalid user data format' },
+        { 
+          success: false,
+          error: 'Invalid user data format' 
+        },
         { status: 400 }
       );
       return addCorsHeaders(response);
     }
     
-    console.log('Parsed user data:', userData);
-    console.log('Telegram ID:', userData.id);
-    
+    console.log('Parsed Telegram user data:', userData);
     const telegramId = userData.id?.toString();
     
     if (!telegramId) {
       console.error('No Telegram ID in user data');
       const response = NextResponse.json(
-        { error: 'Telegram user ID not found' },
+        { 
+          success: false,
+          error: 'Telegram user ID not found' 
+        },
         { status: 400 }
       );
       return addCorsHeaders(response);
     }
     
-    // Check if user exists in database
-    console.log('Querying database for telegram_id:', telegramId);
+    // Find user in database (handles all formats)
+    const user = await findUserByTelegramId(telegramId);
     
-    try {
-      // Query database - FIXED: Your db.query returns an object, not array
-      const result = await db.query(
-        'SELECT * FROM users WHERE telegram_id = ?',
-        [telegramId]
-      ) as any;
-      
-      console.log('Database query result type:', typeof result);
-      console.log('Database query result:', result);
-      
-      // Handle different database driver response formats
-      let user;
-      
-      if (Array.isArray(result)) {
-        // If result is an array (like [rows, fields])
-        const [rows] = result;
-        console.log('Result is array, rows type:', typeof rows);
-        
-        if (Array.isArray(rows) && rows.length > 0) {
-          user = rows[0];
-        } else if (rows && typeof rows === 'object' && rows.id) {
-          // If rows is a single object (like your test showed)
-          user = rows;
-        } else {
-          console.log('No user found in array format');
-          user = null;
-        }
-      } else if (result && typeof result === 'object') {
-        // If result is a single object
-        if (result.id) {
-          user = result;
-        } else {
-          // Check if it's an object with rows property
-          const rows = (result as any).rows || (result as any)[0];
-          if (Array.isArray(rows) && rows.length > 0) {
-            user = rows[0];
-          } else if (rows && rows.id) {
-            user = rows;
-          } else {
-            user = null;
-          }
-        }
-      }
-      
-      console.log('Extracted user:', user);
-      
-      if (!user) {
-        console.log('User not found in database, needs registration');
-        const response = NextResponse.json(
-          { 
-            success: false,
-            error: 'User not registered',
-            needsRegistration: true,
-            telegramId,
-            userData
-          },
-          { status: 404 }
-        );
-        return addCorsHeaders(response);
-      }
-      
-      console.log('User found in database:', {
-        id: user.id,
-        telegram_id: user.telegram_id,
-        username: user.username,
-        first_name: user.first_name,
-        role: user.role
-      });
-      
-      // Update user's last active status
-      try {
-        await db.query(
-          'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE id = ?',
-          [user.id]
-        );
-        console.log('User online status updated');
-      } catch (updateError) {
-        console.warn('Failed to update user status:', updateError);
-        // Continue anyway, not critical
-      }
-      
-      // Generate JWT token
-      const token = jwt.sign(
-        {
-          userId: user.id,
-          telegramId: user.telegram_id,
-          username: user.username,
-          role: user.role,
-          source: 'telegram'
-        },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-      
-      console.log('Token generated successfully');
-      console.log('=== TELEGRAM AUTH SUCCESS ===');
-      
-      // Return user data with token
-      const response = NextResponse.json({
-        success: true,
-        user: {
-          id: user.id,
-          telegramId: user.telegram_id,
-          username: user.username,
-          firstName: user.first_name,
-          email: user.email,
-          role: user.role,
-          balance: parseFloat(user.balance),
-          bonusBalance: parseFloat(user.bonus_balance),
-          referralCode: user.referral_code,
-          createdAt: user.created_at,
-        },
-        token,
-        source: 'telegram'
-      });
-      
-      return addCorsHeaders(response);
-      
-    } catch (dbError: any) {
-      console.error('Database error:', dbError);
+    if (!user) {
+      console.log('User not found in database, needs registration');
       const response = NextResponse.json(
         { 
-          error: 'Database error',
-          details: dbError.message,
-          stack: process.env.NODE_ENV === 'development' ? dbError.stack : undefined
+          success: false,
+          error: 'User not registered',
+          needsRegistration: true,
+          telegramId,
+          userData
         },
-        { status: 500 }
+        { status: 404 }
       );
       return addCorsHeaders(response);
     }
     
+    console.log('✅ User found:', {
+      id: user.id,
+      telegram_id: user.telegram_id,
+      username: user.username,
+      first_name: user.first_name,
+      role: user.role
+    });
+    
+    // Update user's last active status
+    await db.query(
+      'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE id = ?',
+      [user.id]
+    );
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        telegramId: user.telegram_id,
+        username: user.username,
+        role: user.role,
+        source: 'telegram'
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    
+    console.log('✅ Telegram auth successful for:', user.username);
+    
+    // Return user data with token
+    const response = NextResponse.json({
+      success: true,
+      user: {
+        id: user.id,
+        telegramId: user.telegram_id,
+        username: user.username,
+        firstName: user.first_name,
+        email: user.email || '',
+        role: user.role || 'user',
+        balance: parseFloat(user.balance) || 0,
+        bonusBalance: parseFloat(user.bonus_balance) || 0,
+        referralCode: user.referral_code || '',
+        isOnline: true,
+        createdAt: user.created_at,
+      },
+      token,
+      source: 'telegram'
+    });
+    
+    return addCorsHeaders(response);
+    
   } catch (error: any) {
-    console.error('Authentication error:', error);
+    console.error('❌ Authentication error:', error);
     const response = NextResponse.json(
       { 
+        success: false,
         error: 'Authentication failed', 
         details: error.message,
         stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
@@ -458,10 +456,21 @@ export async function POST(request: NextRequest) {
 // Check authentication status
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const authHeader = request.headers.get('authorization');
+    let token = '';
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else {
+      // Check cookies
+      token = request.cookies.get('auth_token')?.value || '';
+    }
     
     if (!token) {
-      const response = NextResponse.json({ authenticated: false });
+      const response = NextResponse.json({ 
+        success: false,
+        authenticated: false 
+      });
       return addCorsHeaders(response);
     }
     
@@ -475,8 +484,7 @@ export async function GET(request: NextRequest) {
       ) as any;
       
       let user;
-      
-      if (Array.isArray(result)) {
+      if (result && Array.isArray(result) && result[0]) {
         const [rows] = result;
         if (Array.isArray(rows) && rows.length > 0) {
           user = rows[0];
@@ -488,11 +496,15 @@ export async function GET(request: NextRequest) {
       }
       
       if (!user) {
-        const response = NextResponse.json({ authenticated: false });
+        const response = NextResponse.json({ 
+          success: false,
+          authenticated: false 
+        });
         return addCorsHeaders(response);
       }
       
       const response = NextResponse.json({
+        success: true,
         authenticated: true,
         user: {
           id: user.id,
@@ -501,22 +513,29 @@ export async function GET(request: NextRequest) {
           firstName: user.first_name,
           email: user.email,
           role: user.role,
-          balance: parseFloat(user.balance),
-          bonusBalance: parseFloat(user.bonus_balance),
+          balance: parseFloat(user.balance) || 0,
+          bonusBalance: parseFloat(user.bonus_balance) || 0,
           referralCode: user.referral_code,
+          isOnline: user.is_online,
           createdAt: user.created_at,
         },
-        source: decoded.source
+        source: decoded.source || 'unknown'
       });
       
       return addCorsHeaders(response);
     } catch (error) {
-      const response = NextResponse.json({ authenticated: false });
+      const response = NextResponse.json({ 
+        success: false,
+        authenticated: false 
+      });
       return addCorsHeaders(response);
     }
   } catch (error: any) {
     console.error('Auth check error:', error);
-    const response = NextResponse.json({ authenticated: false });
+    const response = NextResponse.json({ 
+      success: false,
+      authenticated: false 
+    });
     return addCorsHeaders(response);
   }
 }

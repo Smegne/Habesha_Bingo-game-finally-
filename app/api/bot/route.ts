@@ -4,7 +4,7 @@ import { Markup } from 'telegraf'
 import { db } from '@/lib/mysql-db'
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
-const WEBAPP_URL = process.env.NEXT_PUBLIC_WEBAPP_URL!
+const WEBAPP_URL = process.env.NEXT_PUBLIC_WEBAPP_URL || 'http://localhost:3000'
 const bot = new Telegraf(BOT_TOKEN)
 
 // ============ HELPER FUNCTIONS ============
@@ -12,96 +12,101 @@ async function isRegistered(telegramId: string): Promise<boolean> {
   try {
     console.log(`🔍 Checking registration for Telegram ID: ${telegramId}`);
     
-    // First try to find by exact numeric Telegram ID
-    let rows = await db.query(
-      'SELECT id FROM users WHERE telegram_id = ?',
-      [telegramId]
-    ) as any[]
+    // Try all possible formats
+    const queries = [
+      // Exact match
+      db.query('SELECT id FROM users WHERE telegram_id = ?', [telegramId]),
+      // With "user" prefix
+      db.query('SELECT id FROM users WHERE telegram_id = ?', [`user${telegramId}`]),
+      // Numeric telegram_user_id
+      !isNaN(parseInt(telegramId)) ? 
+        db.query('SELECT id FROM users WHERE telegram_user_id = ?', [parseInt(telegramId)]) : 
+        Promise.resolve([])
+    ];
     
-    // If not found, try to find by "user" + telegramId prefix
-    if (rows.length === 0) {
-      console.log(`🔍 Not found as ${telegramId}, trying with user prefix...`);
-      rows = await db.query(
-        'SELECT id FROM users WHERE telegram_id = ?',
-        [`user${telegramId}`]
-      ) as any[]
+    const results = await Promise.all(queries);
+    
+    for (const result of results) {
+      const rows = result as any[];
+      if (rows && rows.length > 0) {
+        console.log(`✅ User found for Telegram ID ${telegramId}`);
+        return true;
+      }
     }
     
-    console.log(`🔍 Found ${rows.length} users for Telegram ID ${telegramId}`);
-    return rows && rows.length > 0;
+    console.log(`❌ User not found for Telegram ID ${telegramId}`);
+    return false;
   } catch (error) {
     console.error('❌ DB check error:', error);
     return false;
   }
 }
 
-// ✅ FIXED: getUserData function - handles both numeric and prefixed IDs
 async function getUserData(telegramId: string): Promise<any> {
   try {
     console.log(`📊 Getting user data for Telegram ID: ${telegramId}`);
     
-    // First try exact match
-    let rows = await db.query(
-      'SELECT * FROM users WHERE telegram_id = ?',
-      [telegramId]
-    ) as any[]
+    // Try all possible formats
+    const queries = [
+      // Exact match
+      db.query('SELECT * FROM users WHERE telegram_id = ?', [telegramId]),
+      // With "user" prefix
+      db.query('SELECT * FROM users WHERE telegram_id = ?', [`user${telegramId}`]),
+      // Numeric telegram_user_id
+      !isNaN(parseInt(telegramId)) ? 
+        db.query('SELECT * FROM users WHERE telegram_user_id = ?', [parseInt(telegramId)]) : 
+        Promise.resolve([])
+    ];
     
-    // If not found, try with "user" prefix
-    if (rows.length === 0) {
-      console.log(`📊 Not found as ${telegramId}, trying with user prefix...`);
-      rows = await db.query(
-        'SELECT * FROM users WHERE telegram_id = ?',
-        [`user${telegramId}`]
-      ) as any[]
+    const results = await Promise.all(queries);
+    
+    for (const result of results) {
+      const rows = result as any[];
+      if (rows && rows.length > 0) {
+        console.log(`✅ Found user: ${rows[0].username || rows[0].first_name}`);
+        return rows[0];
+      }
     }
     
-    console.log(`📊 Found user: ${rows[0] ? rows[0].username || rows[0].first_name : 'Not found'}`);
-    return rows[0] || null;
+    console.log(`❌ User not found for Telegram ID ${telegramId}`);
+    return null;
   } catch (error) {
     console.error('❌ Get user data error:', error);
     return null;
   }
 }
 
-// ✅ Get user by ID
 async function getUserById(userId: string): Promise<any> {
   try {
-    const rows = await db.query(
+    const result = await db.query(
       'SELECT * FROM users WHERE id = ?',
       [userId]
     ) as any[]
-    return rows[0] || null;
+    return result[0] || null;
   } catch (error) {
     console.error('❌ Get user by ID error:', error);
     return null;
   }
 }
 
-// ✅ Update user online status - handles both numeric and prefixed IDs
 async function updateUserOnlineStatus(telegramId: string): Promise<void> {
   try {
     console.log(`🔄 Updating online status for Telegram ID: ${telegramId}`);
     
-    // First try with exact telegramId
-    let result = await db.query(
-      'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE telegram_id = ?',
-      [telegramId]
-    ) as any;
+    // Get user first to find correct ID format
+    const user = await getUserData(telegramId);
     
-    // If no rows affected, try with "user" prefix
-    if (result.affectedRows === 0) {
-      console.log(`🔄 No update with ${telegramId}, trying with user prefix...`);
-      result = await db.query(
-        'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE telegram_id = ?',
-        [`user${telegramId}`]
-      ) as any;
+    if (user) {
+      await db.query(
+        'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE id = ?',
+        [user.id]
+      );
+      console.log(`✅ Updated online status for user: ${user.username}`);
+    } else {
+      console.log(`⚠️ Could not find user to update online status`);
     }
-    
-    console.log(`🔄 Updated ${result.affectedRows} row(s)`);
   } catch (error: any) {
     console.error('❌ Update online status error:', error.message);
-    console.error('Full error:', error);
-    throw error;
   }
 }
 
@@ -112,6 +117,14 @@ bot.start(async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`🚀 /start from ${telegramId} (${ctx.from.first_name})`);
   
+  // Extract referral code from start parameter
+  const startParam = ctx.payload;
+  let referralMessage = '';
+  
+  if (startParam && startParam.startsWith('HAB')) {
+    referralMessage = `\n🎁 Referral code detected: ${startParam}\nUse /register to apply it!`;
+  }
+  
   // Check if user exists and update status
   try {
     await updateUserOnlineStatus(telegramId);
@@ -120,7 +133,7 @@ bot.start(async (ctx) => {
   }
   
   await ctx.reply(
-    `🎉 Welcome to Habesha Bingo, ${ctx.from.first_name}!\n\n` +
+    `🎉 Welcome to Habesha Bingo, ${ctx.from.first_name}!${referralMessage}\n\n` +
     `🎮 Play exciting bingo games\n` +
     `💰 Win real money prizes\n` +
     `🎁 Get 50 Birr welcome bonus!\n\n` +
@@ -137,18 +150,27 @@ bot.start(async (ctx) => {
   );
 });
 
-// ✅ REGISTER COMMAND
+// ✅ REGISTER COMMAND - IMPROVED VERSION
 bot.command('register', async (ctx) => {
   const telegramId = ctx.from.id.toString();
-  console.log(`📝 /register from ${telegramId} (${ctx.from.first_name})`);
+  const user = ctx.from;
+  console.log(`📝 /register from ${telegramId} (${user.first_name})`);
   
   if (await isRegistered(telegramId)) {
-    await ctx.reply(`✅ You're already registered!\nUse /play to start.`);
+    await ctx.reply(`✅ You're already registered!\nUse /play to start gaming.`);
     return;
   }
 
+  // Check for referral code in command
+  const referralCode = ctx.payload?.trim();
+  let referralMessage = '';
+  
+  if (referralCode && referralCode.startsWith('HAB')) {
+    referralMessage = `\n🎁 Using referral code: ${referralCode}`;
+  }
+
   await ctx.reply(
-    `📱 Registration Required\n\n` +
+    `📱 Registration Required${referralMessage}\n\n` +
     `Click the button below to share your contact:\n\n` +
     `✅ You'll receive:\n` +
     `• 50 Birr welcome bonus\n` +
@@ -160,7 +182,7 @@ bot.command('register', async (ctx) => {
   );
 });
 
-// ✅ HANDLE CONTACT SHARING
+// ✅ HANDLE CONTACT SHARING - IMPROVED VERSION
 bot.on('contact', async (ctx) => {
   const user = ctx.from;
   const contact = ctx.message.contact;
@@ -179,25 +201,40 @@ bot.on('contact', async (ctx) => {
       return;
     }
 
-    const referralCode = `HAB${Date.now().toString(36).toUpperCase()}`;
+    // Generate unique referral code
+    let referralCode = `HAB${telegramId.slice(-6)}${Date.now().toString(36).toUpperCase()}`;
+    
+    // Check if code is unique
+    let isUnique = false;
+    while (!isUnique) {
+      const checkResult = await db.query(
+        'SELECT id FROM users WHERE referral_code = ?',
+        [referralCode]
+      ) as any[];
+      isUnique = checkResult.length === 0;
+      if (!isUnique) {
+        referralCode = `HAB${telegramId.slice(-6)}${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+      }
+    }
     
     console.log(`📝 Registering user ${telegramId} with code ${referralCode}`);
     
-    // Store with "user" prefix to match your database pattern
+    // Register user with BOTH telegram_id formats
     await db.query(
       `INSERT INTO users 
-      (telegram_id, username, first_name, phone, referral_code, balance, bonus_balance, is_online, last_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 50.00, 10.00, TRUE, NOW(), NOW(), NOW())`,
+      (telegram_id, telegram_user_id, username, first_name, phone, referral_code, balance, bonus_balance, is_online, last_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 50.00, 10.00, TRUE, NOW(), NOW(), NOW())`,
       [
         `user${telegramId}`, // Store with "user" prefix
-        user.username || null,
+        parseInt(telegramId), // Store numeric ID separately
+        user.username || `user_${telegramId}`,
         user.first_name || 'User',
         contact.phone_number,
         referralCode
       ]
     );
 
-    console.log(`✅ User ${telegramId} registered successfully as user${telegramId}`);
+    console.log(`✅ User ${telegramId} registered successfully`);
 
     await ctx.reply(
       `✅ Registration Successful!\n\n` +
@@ -217,7 +254,7 @@ bot.on('contact', async (ctx) => {
   }
 });
 
-// ✅ PLAY COMMAND (requires registration)
+// ✅ PLAY COMMAND (requires registration) - IMPROVED VERSION
 bot.command('play', async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`🎮 /play from ${telegramId}`);
@@ -234,16 +271,26 @@ bot.command('play', async (ctx) => {
     console.warn('⚠️ Could not update online status, continuing...');
   }
 
+  const userData = await getUserData(telegramId);
+  const webAppUrl = `${WEBAPP_URL}/game?tgWebAppData=${encodeURIComponent(
+    `user=${JSON.stringify({
+      id: parseInt(telegramId),
+      first_name: ctx.from.first_name,
+      username: ctx.from.username,
+      language_code: ctx.from.language_code
+    })}`
+  )}`;
+
   await ctx.reply(
     '🎮 Opening Habesha Bingo...\n\n' +
     'Get ready to play and win! 🏆',
     Markup.inlineKeyboard([
-      Markup.button.webApp('🎮 Play Now', WEBAPP_URL)
+      Markup.button.webApp('🎮 Play Now', webAppUrl)
     ])
   );
 });
 
-// ✅ DEPOSIT COMMAND (requires registration)
+// ✅ DEPOSIT COMMAND
 bot.command('deposit', async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`💰 /deposit from ${telegramId}`);
@@ -277,12 +324,12 @@ bot.command('deposit', async (ctx) => {
     '✅ **No deposit fees**',
     Markup.inlineKeyboard([
       Markup.button.callback('📸 Submit Screenshot', 'submit_deposit'),
-      Markup.button.webApp('💰 Quick Deposit', WEBAPP_URL)
+      Markup.button.webApp('💰 Quick Deposit', `${WEBAPP_URL}/game`)
     ])
   );
 });
 
-// ✅ BALANCE COMMAND (FIXED - requires registration)
+// ✅ BALANCE COMMAND
 bot.command('balance', async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`💳 /balance from ${telegramId}`);
@@ -311,13 +358,13 @@ bot.command('balance', async (ctx) => {
     '💸 Use /deposit to add funds\n' +
     '🏧 Use /withdraw to cash out',
     Markup.inlineKeyboard([
-      Markup.button.webApp('💸 Quick Deposit', WEBAPP_URL),
-      Markup.button.webApp('🏧 Quick Withdraw', WEBAPP_URL)
+      Markup.button.webApp('💸 Quick Deposit', `${WEBAPP_URL}/game`),
+      Markup.button.webApp('🏧 Quick Withdraw', `${WEBAPP_URL}/game`)
     ])
   );
 });
 
-// ✅ WITHDRAW COMMAND (requires registration)
+// ✅ WITHDRAW COMMAND
 bot.command('withdraw', async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`🏧 /withdraw from ${telegramId}`);
@@ -358,7 +405,7 @@ bot.command('withdraw', async (ctx) => {
   );
 });
 
-// ✅ INVITE COMMAND (FIXED - requires registration)
+// ✅ INVITE COMMAND
 bot.command('invite', async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`👥 /invite from ${telegramId}`);
@@ -394,12 +441,12 @@ bot.command('invite', async (ctx) => {
         '📱 Share on Telegram', 
         `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent('Join Habesha Bingo 🎮 and win real money 💰! Use my referral code: ' + referralCode)}`
       ),
-      Markup.button.webApp('🎮 Play Now', WEBAPP_URL)
+      Markup.button.webApp('🎮 Play Now', `${WEBAPP_URL}/game`)
     ])
   );
 });
 
-// ✅ INSTRUCTIONS COMMAND (no registration needed)
+// ✅ INSTRUCTIONS COMMAND
 bot.command('instructions', async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`📚 /instructions from ${telegramId}`);
@@ -438,7 +485,7 @@ bot.command('instructions', async (ctx) => {
   );
 });
 
-// ✅ SUPPORT COMMAND (no registration needed)
+// ✅ SUPPORT COMMAND
 bot.command('support', async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`📞 /support from ${telegramId}`);
@@ -470,7 +517,7 @@ bot.command('support', async (ctx) => {
   );
 });
 
-// ✅ ABOUT COMMAND (no registration needed)
+// ✅ ABOUT COMMAND
 bot.command('about', async (ctx) => {
   const telegramId = ctx.from.id.toString();
   console.log(`🎯 /about from ${telegramId}`);
@@ -611,7 +658,7 @@ bot.on('text', async (ctx) => {
 export async function POST(request: NextRequest) {
   try {
     const update = await request.json();
-    console.log('📨 Update received:', update.message?.text || update.message?.contact ? 'contact' : 'other');
+    console.log('📨 Bot update received');
     
     // Log the telegram ID for debugging
     if (update.message?.from) {
@@ -622,7 +669,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     console.error('❌ Bot error:', error.message);
-    console.error('Full error:', error);
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 }

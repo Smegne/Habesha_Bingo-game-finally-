@@ -1,16 +1,10 @@
 // app/layout.tsx
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
 import './globals.css'
 
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from 'sonner'
 import { Analytics } from '@vercel/analytics/react'
-
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-})
 
 export const metadata: Metadata = {
   title: 'Habesha Bingo',
@@ -27,8 +21,18 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Add Inter font via link tag */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body
-        className={`${inter.variable} font-sans antialiased min-h-screen bg-background`}
+        className="font-sans antialiased min-h-screen bg-background"
+        style={{ fontFamily: "'Inter', sans-serif" }}
         suppressHydrationWarning
       >
         <ThemeProvider
