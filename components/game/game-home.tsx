@@ -18,8 +18,8 @@ import { useGameStore } from "@/lib/game-store"
 import { Gamepad2, Loader2, AlertCircle, Trophy, Users, Zap, Sparkles } from "lucide-react"
 import { LiveStats } from "../common/live-stats"
 import { BingoCardDisplay } from "./bingo-card-display"
-import { CardPicker } from "./card-picker"
-import { BingoGame } from "./bingo-game"
+import CardPicker  from "./card-picker"
+import BingoGame from "./bingo-game"
 import { cn } from "@/lib/utils"
 
 export function GameHome() {

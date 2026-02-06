@@ -244,22 +244,25 @@ export function MiniApp({ onAdminLogin }: { onAdminLogin?: () => void }) {
   }
 
   // If admin is logged in, show admin panel
- // In the section where admin is detected, change to:
-if (user?.role === 'admin' && isLoggedIn) {
-  console.log('Admin detected, showing admin panel')
-  
-  // Dynamically import the admin panel
-  const DynamicAdminPanel = dynamic(() => import('@/components/admin-panel').then(mod => {
-    console.log('Admin panel module loaded')
-    // Handle both named and default exports
-    return mod.AdminPanel || mod.default || (() => <div>Admin Panel Load Error</div>)
-  }), { 
-    ssr: false,
-    loading: () => <LoadingScreen message="Loading admin panel..." />
-  })
-  
-  return <DynamicAdminPanel />
-}
+  if (user?.role === 'admin' && isLoggedIn) {
+    console.log('Admin detected, showing admin panel')
+    
+    // Dynamically import the admin panel with correct export name
+    const DynamicAdminPanel = dynamic(() => import('@/components/admin-panel').then(mod => {
+      console.log('Admin panel module loaded:', Object.keys(mod))
+      
+      // Try to get the exported component - use AdminPanelEnhanced
+      return mod.AdminPanelEnhanced || mod.AdminPanel || mod.default || SimpleAdminPanel
+    }).catch(error => {
+      console.error('Error loading admin panel:', error)
+      return () => SimpleAdminPanel
+    }), { 
+      ssr: false,
+      loading: () => <LoadingScreen message="Loading admin panel..." />
+    })
+    
+    return <DynamicAdminPanel />
+  }
 
   // Show auth screen if not logged in
   if (!isLoggedIn) {

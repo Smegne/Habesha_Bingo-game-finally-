@@ -1,7 +1,27 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-const API_URL = "http://localhost:3000/api";
+// Change this line:
+
+
+// To this:
+const getApiUrl = () => {
+  if (typeof window === 'undefined') {
+    return "http://localhost:3000/api";
+  }
+  
+  // Check if we're in Telegram WebApp or regular web
+  const isTelegram = window.Telegram?.WebApp || 
+                     window.location.search.includes('tgWebApp') ||
+                     window.location.hash.includes('tgWebApp');
+  
+  // Use current origin for Telegram, localhost for dev
+  return isTelegram 
+    ? `${window.location.origin}/api`
+    : "http://localhost:3000/api";
+};
+
+const API_URL = getApiUrl();
 
 interface ApiStore {
   // State
@@ -78,6 +98,35 @@ interface ApiStore {
     referralCode?: string,
     email?: string
   ) => Promise<{ success: boolean; message: string }>;
+}
+// In game-store.ts, add this function:
+refreshCardStatus: async (cardId: number) => {
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    
+    const response = await fetch(`${API_URL}/games/cards/${cardId}`, {
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Cache-Control': 'no-cache'
+      },
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      
+      // Update the specific card in availableCards
+      set((state) => ({
+        availableCards: state.availableCards.map(card => 
+          card.id === cardId || card.card_number === cardId
+            ? { ...card, ...data.card, is_used: Boolean(data.card.is_used) }
+            : card
+        ),
+      }));
+    }
+  } catch (error) {
+    console.error('Refresh card status error:', error);
+  }
 }
 
 interface User {

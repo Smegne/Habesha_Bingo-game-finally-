@@ -10,44 +10,98 @@ const bot = new Telegraf(BOT_TOKEN)
 // ============ HELPER FUNCTIONS ============
 async function isRegistered(telegramId: string): Promise<boolean> {
   try {
-    const rows = await db.query(
+    console.log(`🔍 Checking registration for Telegram ID: ${telegramId}`);
+    
+    // First try to find by exact numeric Telegram ID
+    let rows = await db.query(
       'SELECT id FROM users WHERE telegram_id = ?',
       [telegramId]
     ) as any[]
-    return rows && rows.length > 0
+    
+    // If not found, try to find by "user" + telegramId prefix
+    if (rows.length === 0) {
+      console.log(`🔍 Not found as ${telegramId}, trying with user prefix...`);
+      rows = await db.query(
+        'SELECT id FROM users WHERE telegram_id = ?',
+        [`user${telegramId}`]
+      ) as any[]
+    }
+    
+    console.log(`🔍 Found ${rows.length} users for Telegram ID ${telegramId}`);
+    return rows && rows.length > 0;
   } catch (error) {
-    console.error('DB check error:', error)
-    return false
+    console.error('❌ DB check error:', error);
+    return false;
   }
 }
 
-// ✅ FIXED: getUserData function
+// ✅ FIXED: getUserData function - handles both numeric and prefixed IDs
 async function getUserData(telegramId: string): Promise<any> {
   try {
-    const rows = await db.query(
+    console.log(`📊 Getting user data for Telegram ID: ${telegramId}`);
+    
+    // First try exact match
+    let rows = await db.query(
       'SELECT * FROM users WHERE telegram_id = ?',
       [telegramId]
     ) as any[]
     
-    console.log(`📊 getUserData for ${telegramId}:`, rows[0] ? 'Found' : 'Not found')
-    return rows[0] || null
+    // If not found, try with "user" prefix
+    if (rows.length === 0) {
+      console.log(`📊 Not found as ${telegramId}, trying with user prefix...`);
+      rows = await db.query(
+        'SELECT * FROM users WHERE telegram_id = ?',
+        [`user${telegramId}`]
+      ) as any[]
+    }
+    
+    console.log(`📊 Found user: ${rows[0] ? rows[0].username || rows[0].first_name : 'Not found'}`);
+    return rows[0] || null;
   } catch (error) {
-    console.error('Get user data error:', error)
-    return null
+    console.error('❌ Get user data error:', error);
+    return null;
   }
 }
 
-// ✅ FIXED: Get user by ID
+// ✅ Get user by ID
 async function getUserById(userId: string): Promise<any> {
   try {
     const rows = await db.query(
       'SELECT * FROM users WHERE id = ?',
       [userId]
     ) as any[]
-    return rows[0] || null
+    return rows[0] || null;
   } catch (error) {
-    console.error('Get user by ID error:', error)
-    return null
+    console.error('❌ Get user by ID error:', error);
+    return null;
+  }
+}
+
+// ✅ Update user online status - handles both numeric and prefixed IDs
+async function updateUserOnlineStatus(telegramId: string): Promise<void> {
+  try {
+    console.log(`🔄 Updating online status for Telegram ID: ${telegramId}`);
+    
+    // First try with exact telegramId
+    let result = await db.query(
+      'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE telegram_id = ?',
+      [telegramId]
+    ) as any;
+    
+    // If no rows affected, try with "user" prefix
+    if (result.affectedRows === 0) {
+      console.log(`🔄 No update with ${telegramId}, trying with user prefix...`);
+      result = await db.query(
+        'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE telegram_id = ?',
+        [`user${telegramId}`]
+      ) as any;
+    }
+    
+    console.log(`🔄 Updated ${result.affectedRows} row(s)`);
+  } catch (error: any) {
+    console.error('❌ Update online status error:', error.message);
+    console.error('Full error:', error);
+    throw error;
   }
 }
 
@@ -55,8 +109,15 @@ async function getUserById(userId: string): Promise<any> {
 
 // ✅ START COMMAND
 bot.start(async (ctx) => {
-  const telegramId = ctx.from.id.toString()
-  console.log(`🚀 /start from ${telegramId}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`🚀 /start from ${telegramId} (${ctx.from.first_name})`);
+  
+  // Check if user exists and update status
+  try {
+    await updateUserOnlineStatus(telegramId);
+  } catch (error) {
+    console.warn('⚠️ Could not update online status, continuing...');
+  }
   
   await ctx.reply(
     `🎉 Welcome to Habesha Bingo, ${ctx.from.first_name}!\n\n` +
@@ -73,17 +134,17 @@ bot.start(async (ctx) => {
     `/instructions - How to play\n` +
     `/support - Contact us\n` +
     `/about - About us`
-  )
-})
+  );
+});
 
 // ✅ REGISTER COMMAND
 bot.command('register', async (ctx) => {
-  const telegramId = ctx.from.id.toString()
-  console.log(`📝 /register from ${telegramId}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`📝 /register from ${telegramId} (${ctx.from.first_name})`);
   
   if (await isRegistered(telegramId)) {
-    await ctx.reply(`✅ You're already registered!\nUse /play to start.`)
-    return
+    await ctx.reply(`✅ You're already registered!\nUse /play to start.`);
+    return;
   }
 
   await ctx.reply(
@@ -96,46 +157,47 @@ bot.command('register', async (ctx) => {
     Markup.keyboard([
       [Markup.button.contactRequest('📱 Share Contact')]
     ]).resize().oneTime()
-  )
-})
+  );
+});
 
 // ✅ HANDLE CONTACT SHARING
 bot.on('contact', async (ctx) => {
-  const user = ctx.from
-  const contact = ctx.message.contact
-  const telegramId = user.id.toString()
+  const user = ctx.from;
+  const contact = ctx.message.contact;
+  const telegramId = user.id.toString();
   
-  console.log(`📞 Contact from ${telegramId}`)
+  console.log(`📞 Contact from ${telegramId} (${user.first_name})`);
   
   if (contact.user_id !== user.id) {
-    await ctx.reply('❌ Please share your own contact.')
-    return
+    await ctx.reply('❌ Please share your own contact.');
+    return;
   }
 
   try {
     if (await isRegistered(telegramId)) {
-      await ctx.reply(`✅ Welcome back! You're already registered.`)
-      return
+      await ctx.reply(`✅ Welcome back! You're already registered.`);
+      return;
     }
 
-    const referralCode = `HAB${Date.now().toString(36).toUpperCase()}`
+    const referralCode = `HAB${Date.now().toString(36).toUpperCase()}`;
     
-    console.log(`📝 Registering user ${telegramId} with code ${referralCode}`)
+    console.log(`📝 Registering user ${telegramId} with code ${referralCode}`);
     
+    // Store with "user" prefix to match your database pattern
     await db.query(
       `INSERT INTO users 
-      (telegram_id, username, first_name, phone, referral_code, balance, bonus_balance, is_online, last_active)
-      VALUES (?, ?, ?, ?, ?, 50.00, 10.00, TRUE, NOW())`,
+      (telegram_id, username, first_name, phone, referral_code, balance, bonus_balance, is_online, last_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 50.00, 10.00, TRUE, NOW(), NOW(), NOW())`,
       [
-        telegramId,
+        `user${telegramId}`, // Store with "user" prefix
         user.username || null,
         user.first_name || 'User',
         contact.phone_number,
         referralCode
       ]
-    )
+    );
 
-    console.log(`✅ User ${telegramId} registered successfully`)
+    console.log(`✅ User ${telegramId} registered successfully as user${telegramId}`);
 
     await ctx.reply(
       `✅ Registration Successful!\n\n` +
@@ -147,29 +209,30 @@ bot.on('contact', async (ctx) => {
       `Share it to earn 10 Birr per friend!\n\n` +
       `Now use /play to start gaming!`,
       Markup.removeKeyboard()
-    )
+    );
     
   } catch (error: any) {
-    console.error('❌ Registration error:', error)
-    await ctx.reply('❌ Registration failed. Please try /register again.')
+    console.error('❌ Registration error:', error);
+    await ctx.reply('❌ Registration failed. Please try /register again.');
   }
-})
+});
 
 // ✅ PLAY COMMAND (requires registration)
 bot.command('play', async (ctx) => {
-  const telegramId = ctx.from.id.toString()
-  console.log(`🎮 /play from ${telegramId}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`🎮 /play from ${telegramId}`);
   
   if (!await isRegistered(telegramId)) {
-    await ctx.reply(`⚠️ Please register first with /register`)
-    return
+    await ctx.reply(`⚠️ Please register first with /register`);
+    return;
   }
 
   // Update last active
-  await db.query(
-    'UPDATE users SET is_online = TRUE, last_active = NOW() WHERE telegram_id = ?',
-    [telegramId]
-  )
+  try {
+    await updateUserOnlineStatus(telegramId);
+  } catch (error) {
+    console.warn('⚠️ Could not update online status, continuing...');
+  }
 
   await ctx.reply(
     '🎮 Opening Habesha Bingo...\n\n' +
@@ -177,17 +240,24 @@ bot.command('play', async (ctx) => {
     Markup.inlineKeyboard([
       Markup.button.webApp('🎮 Play Now', WEBAPP_URL)
     ])
-  )
-})
+  );
+});
 
 // ✅ DEPOSIT COMMAND (requires registration)
 bot.command('deposit', async (ctx) => {
-  const telegramId = ctx.from.id.toString()
-  console.log(`💰 /deposit from ${telegramId}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`💰 /deposit from ${telegramId}`);
   
   if (!await isRegistered(telegramId)) {
-    await ctx.reply(`⚠️ Please register first with /register`)
-    return
+    await ctx.reply(`⚠️ Please register first with /register`);
+    return;
+  }
+
+  // Update last active
+  try {
+    await updateUserOnlineStatus(telegramId);
+  } catch (error) {
+    console.warn('⚠️ Could not update online status, continuing...');
   }
 
   await ctx.reply(
@@ -209,30 +279,29 @@ bot.command('deposit', async (ctx) => {
       Markup.button.callback('📸 Submit Screenshot', 'submit_deposit'),
       Markup.button.webApp('💰 Quick Deposit', WEBAPP_URL)
     ])
-  )
-})
+  );
+});
 
 // ✅ BALANCE COMMAND (FIXED - requires registration)
 bot.command('balance', async (ctx) => {
-  const telegramId = ctx.from.id.toString()
-  console.log(`💳 /balance from ${telegramId}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`💳 /balance from ${telegramId}`);
   
   if (!await isRegistered(telegramId)) {
-    await ctx.reply(`⚠️ Please register first with /register`)
-    return
+    await ctx.reply(`⚠️ Please register first with /register`);
+    return;
   }
 
-  const user = await getUserData(telegramId)
-  console.log(`📊 Balance check user data:`, user)
+  const user = await getUserData(telegramId);
   
   if (!user) {
-    await ctx.reply('❌ User not found. Please register with /register')
-    return
+    await ctx.reply('❌ User not found. Please register with /register');
+    return;
   }
 
-  const balance = parseFloat(user.balance || 0)
-  const bonusBalance = parseFloat(user.bonus_balance || 0)
-  const totalBalance = balance + bonusBalance
+  const balance = parseFloat(user.balance || 0);
+  const bonusBalance = parseFloat(user.bonus_balance || 0);
+  const totalBalance = balance + bonusBalance;
 
   await ctx.reply(
     '💰 **Your Wallet**\n\n' +
@@ -245,29 +314,29 @@ bot.command('balance', async (ctx) => {
       Markup.button.webApp('💸 Quick Deposit', WEBAPP_URL),
       Markup.button.webApp('🏧 Quick Withdraw', WEBAPP_URL)
     ])
-  )
-})
+  );
+});
 
 // ✅ WITHDRAW COMMAND (requires registration)
 bot.command('withdraw', async (ctx) => {
-  const telegramId = ctx.from.id.toString()
-  console.log(`🏧 /withdraw from ${telegramId}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`🏧 /withdraw from ${telegramId}`);
   
   if (!await isRegistered(telegramId)) {
-    await ctx.reply(`⚠️ Please register first with /register`)
-    return
+    await ctx.reply(`⚠️ Please register first with /register`);
+    return;
   }
 
-  const user = await getUserData(telegramId)
+  const user = await getUserData(telegramId);
   
   if (!user) {
-    await ctx.reply('❌ User not found. Please register with /register')
-    return
+    await ctx.reply('❌ User not found. Please register with /register');
+    return;
   }
 
-  const balance = parseFloat(user.balance || 0)
-  const bonusBalance = parseFloat(user.bonus_balance || 0)
-  const totalBalance = balance + bonusBalance
+  const balance = parseFloat(user.balance || 0);
+  const bonusBalance = parseFloat(user.bonus_balance || 0);
+  const totalBalance = balance + bonusBalance;
 
   await ctx.reply(
     '🏧 **Withdraw Funds**\n\n' +
@@ -286,29 +355,28 @@ bot.command('withdraw', async (ctx) => {
     '0911-123-4567\n' +
     '```',
     Markup.forceReply()
-  )
-})
+  );
+});
 
 // ✅ INVITE COMMAND (FIXED - requires registration)
 bot.command('invite', async (ctx) => {
-  const telegramId = ctx.from.id.toString()
-  console.log(`👥 /invite from ${telegramId}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`👥 /invite from ${telegramId}`);
   
   if (!await isRegistered(telegramId)) {
-    await ctx.reply(`⚠️ Please register first with /register`)
-    return
+    await ctx.reply(`⚠️ Please register first with /register`);
+    return;
   }
 
-  const user = await getUserData(telegramId)
-  console.log(`📊 Invite user data:`, user)
+  const user = await getUserData(telegramId);
   
   if (!user) {
-    await ctx.reply('❌ User not found. Please register with /register')
-    return
+    await ctx.reply('❌ User not found. Please register with /register');
+    return;
   }
 
-  const referralCode = user.referral_code
-  const inviteLink = `https://t.me/habeshabingo1_bot?start=${referralCode}`
+  const referralCode = user.referral_code;
+  const inviteLink = `https://t.me/habeshabingo1_bot?start=${referralCode}`;
   
   await ctx.reply(
     '👥 **Invite Friends & Earn!**\n\n' +
@@ -328,12 +396,23 @@ bot.command('invite', async (ctx) => {
       ),
       Markup.button.webApp('🎮 Play Now', WEBAPP_URL)
     ])
-  )
-})
+  );
+});
 
 // ✅ INSTRUCTIONS COMMAND (no registration needed)
 bot.command('instructions', async (ctx) => {
-  console.log(`📚 /instructions from ${ctx.from.id}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`📚 /instructions from ${telegramId}`);
+  
+  // Update last active if registered
+  try {
+    if (await isRegistered(telegramId)) {
+      await updateUserOnlineStatus(telegramId);
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not update online status, continuing...');
+  }
+  
   await ctx.reply(
     '📚 **How to Play Habesha Bingo**\n\n' +
     '**🎮 Game Rules:**\n' +
@@ -356,12 +435,23 @@ bot.command('instructions', async (ctx) => {
     '2. /deposit - Add funds\n' +
     '3. /play - Start gaming!\n\n' +
     'Need help? Use /support'
-  )
-})
+  );
+});
 
 // ✅ SUPPORT COMMAND (no registration needed)
 bot.command('support', async (ctx) => {
-  console.log(`📞 /support from ${ctx.from.id}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`📞 /support from ${telegramId}`);
+  
+  // Update last active if registered
+  try {
+    if (await isRegistered(telegramId)) {
+      await updateUserOnlineStatus(telegramId);
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not update online status, continuing...');
+  }
+  
   await ctx.reply(
     '📞 **Customer Support**\n\n' +
     '**For assistance, contact:**\n' +
@@ -377,12 +467,23 @@ bot.command('support', async (ctx) => {
     '• Usually within 1-2 hours\n' +
     '• Maximum 24 hours\n\n' +
     'We\'re here to help! 🎮'
-  )
-})
+  );
+});
 
 // ✅ ABOUT COMMAND (no registration needed)
 bot.command('about', async (ctx) => {
-  console.log(`🎯 /about from ${ctx.from.id}`)
+  const telegramId = ctx.from.id.toString();
+  console.log(`🎯 /about from ${telegramId}`);
+  
+  // Update last active if registered
+  try {
+    if (await isRegistered(telegramId)) {
+      await updateUserOnlineStatus(telegramId);
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not update online status, continuing...');
+  }
+  
   await ctx.reply(
     '🎯 **About Habesha Bingo**\n\n' +
     '**🌟 Our Mission:**\n' +
@@ -406,14 +507,14 @@ bot.command('about', async (ctx) => {
     '• Secure payment processing\n\n' +
     'Join thousands of happy players! 🎉\n\n' +
     'Start now with /register'
-  )
-})
+  );
+});
 
 // ============ CALLBACK HANDLERS ============
 
 // Deposit screenshot callback
 bot.action('submit_deposit', async (ctx) => {
-  await ctx.answerCbQuery()
+  await ctx.answerCbQuery();
   await ctx.reply(
     '📸 **Send Payment Screenshot**\n\n' +
     'Please send the screenshot of your payment.\n' +
@@ -423,16 +524,16 @@ bot.action('submit_deposit', async (ctx) => {
     '• Transaction ID\n' +
     '• Recipient number\n\n' +
     'We\'ll verify within 1-24 hours.'
-  )
-})
+  );
+});
 
 // Handle photo for deposit
 bot.on('photo', async (ctx) => {
-  const telegramId = ctx.from.id.toString()
+  const telegramId = ctx.from.id.toString();
   
   if (!await isRegistered(telegramId)) {
-    await ctx.reply(`⚠️ Please register first with /register`)
-    return
+    await ctx.reply(`⚠️ Please register first with /register`);
+    return;
   }
 
   await ctx.reply(
@@ -441,41 +542,50 @@ bot.on('photo', async (ctx) => {
     'Example: `100`\n\n' +
     'Or type "cancel" to cancel.',
     Markup.forceReply()
-  )
-})
+  );
+});
 
 // Handle text responses for deposit amount
 bot.on('text', async (ctx) => {
-  const text = ctx.message.text.trim()
-  const telegramId = ctx.from.id.toString()
+  const text = ctx.message.text.trim();
+  const telegramId = ctx.from.id.toString();
+  
+  // Update last active if registered
+  try {
+    if (await isRegistered(telegramId)) {
+      await updateUserOnlineStatus(telegramId);
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not update online status, continuing...');
+  }
   
   // Check if replying to deposit amount request
   if (ctx.message.reply_to_message?.text?.includes('deposit amount')) {
     if (text.toLowerCase() === 'cancel') {
-      await ctx.reply('❌ Deposit cancelled.')
-      return
+      await ctx.reply('❌ Deposit cancelled.');
+      return;
     }
     
-    const amount = parseFloat(text)
+    const amount = parseFloat(text);
     
     if (isNaN(amount) || amount < 10) {
-      await ctx.reply('❌ Invalid amount. Minimum deposit is 10 Birr.')
-      return
+      await ctx.reply('❌ Invalid amount. Minimum deposit is 10 Birr.');
+      return;
     }
     
     try {
-      const user = await getUserData(telegramId)
+      const user = await getUserData(telegramId);
       
       if (!user) {
-        await ctx.reply('❌ User not found. Please register first.')
-        return
+        await ctx.reply('❌ User not found. Please register first.');
+        return;
       }
       
       await db.query(
         `INSERT INTO deposits (user_id, amount, method, status, created_at)
          VALUES (?, ?, 'telebirr', 'pending', NOW())`,
         [user.id, amount]
-      )
+      );
       
       await ctx.reply(
         `✅ **Deposit Request Submitted!**\n\n` +
@@ -488,25 +598,32 @@ bot.on('text', async (ctx) => {
         `3. Funds will be added to your balance\n\n` +
         `⏰ **Processing time:** 1-24 hours\n\n` +
         `Check /balance for updates!`
-      )
+      );
       
     } catch (error) {
-      console.error('❌ Deposit error:', error)
-      await ctx.reply('❌ Failed to submit deposit. Please try again.')
+      console.error('❌ Deposit error:', error);
+      await ctx.reply('❌ Failed to submit deposit. Please try again.');
     }
   }
-})
+});
 
 // ============ WEBHOOK HANDLER ============
 export async function POST(request: NextRequest) {
   try {
-    const update = await request.json()
-    console.log('📨 Update received:', update.message?.text || 'contact/other')
-    await bot.handleUpdate(update)
-    return NextResponse.json({ ok: true })
+    const update = await request.json();
+    console.log('📨 Update received:', update.message?.text || update.message?.contact ? 'contact' : 'other');
+    
+    // Log the telegram ID for debugging
+    if (update.message?.from) {
+      console.log(`👤 From: ${update.message.from.id} (${update.message.from.first_name})`);
+    }
+    
+    await bot.handleUpdate(update);
+    return NextResponse.json({ ok: true });
   } catch (error: any) {
-    console.error('❌ Bot error:', error.message)
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+    console.error('❌ Bot error:', error.message);
+    console.error('Full error:', error);
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -519,5 +636,5 @@ export async function GET() {
       '/support', '/about'
     ],
     time: new Date().toISOString()
-  })
+  });
 }

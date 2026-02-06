@@ -13,13 +13,6 @@ import {
   CardChecklist as CardChecklistIcon
 } from 'react-bootstrap-icons';
 import { useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
-
-// Dynamically import the BingoGame component
-const BingoGame = dynamic(() => import('./bingo-game'), {
-  loading: () => <div className="text-white text-center py-10">Loading BINGO Game...</div>,
-  ssr: false
-});
 
 // Types
 interface BingoCardCell {
@@ -70,10 +63,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
     balance: 20
   });
 
-  // NEW STATE for BingoGame modal
-  const [showBingoGame, setShowBingoGame] = useState<boolean>(false);
-  const [bingoGameData, setBingoGameData] = useState<any>(null);
-
   // Refs for intervals
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const callSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -104,7 +93,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
     };
   }, []);
 
-  // Play sound
+  // Play sound - Moved to top to avoid circular dependencies
   const playSound = useCallback((type: string) => {
     if (!soundEnabled) return;
     
@@ -185,11 +174,9 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
         newSelected.add(randomNum);
         selectedCount++;
         
-        // Add to last selected numbers (with deduplication)
+        // Add to last selected numbers
         setLastSelectedNumbers(prev => {
-          // Remove any existing instance of this number first
-          const filtered = prev.filter(n => n !== randomNum);
-          const newLast = [randomNum, ...filtered];
+          const newLast = [randomNum, ...prev];
           if (newLast.length > MAX_LAST_NUMBERS) {
             newLast.pop();
           }
@@ -337,11 +324,11 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
     playSound('match');
   }, [bingoCardGenerated, bingoCardNumbers, bingoCardMatches, selectedNumbers, markedNumbers, playSound]);
 
-  // MODIFIED: Open BingoGame in modal instead of redirecting
+  // Redirect to bingo game
   const redirectToBingoGame = useCallback(() => {
     playSound('redirect');
     
-    // Prepare game state
+    // Store game state for the bingo game
     const gameState = {
       selectedNumbers: Array.from(selectedNumbers),
       markedNumbers: Array.from(markedNumbers),
@@ -351,36 +338,20 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
       timestamp: new Date().toISOString()
     };
     
-    // Get card data
+    localStorage.setItem('bingoGameState', JSON.stringify(gameState));
+    
+    // Also store the card data separately for the BingoGame page
     const cardData = JSON.parse(localStorage.getItem('selectedBingoCard') || '{}');
+    localStorage.setItem('bingoCardData', JSON.stringify(cardData));
     
-    // Combine all data for BingoGame
-    const bingoData = {
-      gameState,
-      cardData,
-      stats: gameStats,
-      lastSelectedNumbers
-    };
-    
-    // Store in state and localStorage
-    setBingoGameData(bingoData);
-    localStorage.setItem('bingoGameData', JSON.stringify(bingoData));
-    
-    // Stop countdown
-    stopCountdown();
-    
-    // Hide countdown overlay
-    setShowCountdownOverlay(false);
-    
-    // Notify parent component
+    // Notify parent component about countdown completion
     if (onCountdownComplete) {
       onCountdownComplete();
     }
     
-    // Show BingoGame component in modal
-    setShowBingoGame(true);
-    
-  }, [selectedNumbers, markedNumbers, bingoCardNumbers, bingoCardMatches, bingoCardCount, gameStats, lastSelectedNumbers, onCountdownComplete, playSound, stopCountdown]);
+    // Navigate to the BingoGame page
+    router.push('/game/bingo');
+  }, [selectedNumbers, markedNumbers, bingoCardNumbers, bingoCardMatches, bingoCardCount, onCountdownComplete, router, playSound]);
 
   // Start the countdown timer
   const startCountdown = useCallback(() => {
@@ -399,7 +370,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
             clearInterval(countdownIntervalRef.current);
           }
           setCountdownActive(false);
-          redirectToBingoGame(); // This now opens the modal
+          redirectToBingoGame();
           return 0;
         }
         return prev - 1;
@@ -407,13 +378,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
     }, 1000);
   }, [countdownActive, playSound, redirectToBingoGame]);
 
-  // Close BingoGame and return to picker
-  const closeBingoGame = useCallback(() => {
-    setShowBingoGame(false);
-    playSound('close');
-  }, [playSound]);
-
-  // Toggle number selection
+  // Toggle number selection - Defined AFTER all functions it depends on
   const toggleNumberSelection = useCallback((number: number) => {
     setSelectedNumbers(prevSelected => {
       const newSelected = new Set(prevSelected);
@@ -448,11 +413,9 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
         checkBingoCardMatches(newSelected, newMarked);
       }
       
-      // Update last selected numbers (with deduplication)
+      // Update last selected numbers
       setLastSelectedNumbers(prev => {
-        // Remove any existing instance of this number first
-        const filtered = prev.filter(n => n !== number);
-        const newLast = [number, ...filtered];
+        const newLast = [number, ...prev];
         if (newLast.length > MAX_LAST_NUMBERS) {
           newLast.pop();
         }
@@ -473,7 +436,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
     clearSelections();
     clearBingoCard();
     stopCountdown();
-    setShowBingoGame(false);
   }, [clearSelections, clearBingoCard, stopCountdown]);
 
   // Render the number grid
@@ -492,7 +454,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
       
       cells.push(
         <div
-          key={i} // ✅ This is fine - numbers 1-400 are unique
+          key={i}
           className="number-cell"
           style={{ backgroundColor: bgColor }}
           onClick={() => toggleNumberSelection(i)}
@@ -517,7 +479,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
       
       return (
         <div
-          key={index} // ✅ This is fine - array indices are unique
+          key={index}
           className={`bingo-5x5-cell ${isFree ? 'free-space' : ''} ${isMatched ? 'matched' : ''}`}
           onClick={() => {
             if (!isFree) {
@@ -540,31 +502,10 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 relative">
-      {/* BingoGame Modal Overlay */}
-      {showBingoGame && bingoGameData && (
-        <div className="fixed inset-0 bg-black/95 z-50 overflow-y-auto p-4">
-          <div className="max-w-6xl mx-auto">
-            {/* Close button */}
-            <button
-              onClick={closeBingoGame}
-              className="fixed top-4 right-4 z-50 px-4 py-2 bg-red-600 text-white rounded-full flex items-center gap-2 hover:bg-red-700 transition-colors shadow-lg"
-            >
-              <BoxArrowRight /> Back to Card Picker
-            </button>
-            
-            {/* BingoGame Component */}
-            <BingoGame 
-              initialData={bingoGameData}
-              onClose={closeBingoGame}
-            />
-          </div>
-        </div>
-      )}
-
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       {/* Countdown Overlay */}
-      {showCountdownOverlay && !showBingoGame && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-40">
+      {showCountdownOverlay && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
           <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-3xl p-8 max-w-md w-full mx-4 text-center text-white shadow-2xl animate-pulse">
             <h2 className="text-3xl font-bold mb-4 flex items-center justify-center gap-3">
               <Clock className="text-yellow-300" />
@@ -588,7 +529,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
             </div>
             
             <p className="text-sm opacity-75">
-              You will see the BINGO game when the countdown reaches zero.
+              You will be automatically redirected to the BINGO game when the countdown reaches zero.
             </p>
             
             <div className="flex gap-4 mt-6">
@@ -614,7 +555,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
 
       {/* Sound Control */}
       <div 
-        className="fixed bottom-6 right-6 bg-black/70 rounded-full w-12 h-12 flex items-center justify-center cursor-pointer border-2 border-yellow-400 z-30 shadow-lg"
+        className="fixed bottom-6 right-6 bg-black/70 rounded-full w-12 h-12 flex items-center justify-center cursor-pointer border-2 border-yellow-400 z-40 shadow-lg"
         onClick={toggleSound}
       >
         {soundEnabled ? (
@@ -629,7 +570,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
         <div className="bg-gradient-to-r from-indigo-600 to-purple-700 text-white rounded-2xl p-6 mb-8 shadow-xl">
           <h1 className="text-3xl font-bold text-center flex items-center justify-center gap-3">
             <Dice5Icon size={36} />
-            BINGO CARD PICKER
+            BINGO CARTELA
           </h1>
           <p className="text-center text-lg opacity-90 mt-2">
             Select numbers to generate your BINGO card
@@ -730,9 +671,9 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
                       {lastSelectedNumbers.length === 0 ? (
                         <span className="text-gray-500 italic">None yet</span>
                       ) : (
-                        lastSelectedNumbers.map((num, index) => (
+                        lastSelectedNumbers.map(num => (
                           <span 
-                            key={`${num}-${index}`} // ✅ FIXED: Added index to make unique
+                            key={num} 
                             className="px-3 py-1 bg-indigo-600 text-white rounded-full text-sm font-semibold"
                           >
                             {num}
@@ -852,7 +793,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onCardSelected, onCountdownComp
                 </li>
                 <li className="flex items-start gap-2">
                   <Trophy className="text-yellow-500 mt-1" />
-                  <span><strong>When timer ends</strong>, the BINGO game will appear on this page</span>
+                  <span><strong>When timer ends</strong>, you'll be redirected to the BINGO game page</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <Bullseye className="text-red-500 mt-1" />
