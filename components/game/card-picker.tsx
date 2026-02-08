@@ -1,18 +1,37 @@
-// components/game/card-picker.tsx - FULLY CORRECTED VERSION
+// components/game/card-picker.tsx - DEBUGGED VERSION
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   PlayCircle, VolumeUpFill, VolumeMuteFill, 
   CardChecklist, XCircle, BoxArrowRight,
-  PersonCircle, ArrowClockwise,
-  ShieldCheck
+  PersonCircle, ArrowClockwise, ShieldCheck,
+  StarFill, TrophyFill, Coin, Grid3x3GapFill,
+  Search, Filter, SortNumericDown, SortNumericUpAlt,
+  LightningChargeFill, AwardFill, GiftFill,
+  Dice5Fill, Stars
 } from 'react-bootstrap-icons';
 import dynamic from 'next/dynamic';
 import { useGameStore } from '@/lib/game-store';
 
+// Dynamic import for BingoGame component
 const BingoGame = dynamic(() => import('./bingo-game'), {
-  loading: () => <div className="text-white text-center py-10">Loading BINGO Game...</div>,
+  loading: () => (
+    <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-20 h-20 mx-auto mb-4">
+          <div className="absolute inset-0 animate-ping rounded-full bg-gradient-to-r from-purple-500 to-pink-500 opacity-20"></div>
+          <div className="relative w-20 h-20 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center">
+            <Dice5Fill size={32} className="text-white animate-spin" />
+          </div>
+        </div>
+        <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-300 to-pink-300">
+          Loading BINGO Game...
+        </p>
+        <p className="text-white/70 mt-2">Preparing your gaming experience</p>
+      </div>
+    </div>
+  ),
   ssr: false
 });
 
@@ -20,6 +39,7 @@ interface Cartela {
   id: number;
   cartela_number: string;
   is_available: boolean;
+  popularity?: number;
 }
 
 interface User {
@@ -52,11 +72,15 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   } = useGameStore();
   
   const [cartelas, setCartelas] = useState<Cartela[]>([]);
+  const [filteredCartelas, setFilteredCartelas] = useState<Cartela[]>([]);
   const [selectedCartela, setSelectedCartela] = useState<Cartela | null>(null);
   const [bingoCardNumbers, setBingoCardNumbers] = useState<(number | string)[]>([]);
   const [generatedCardData, setGeneratedCardData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [sortBy, setSortBy] = useState<'number' | 'availability'>('number');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   
   // User state - derived from store
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -67,20 +91,30 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     timestamp: string;
   } | null>(null);
   
-  // Game modal state
+  // Game modal state - SIMPLIFIED
   const [showBingoGame, setShowBingoGame] = useState<boolean>(false);
   const [bingoGameData, setBingoGameData] = useState<any>(null);
   
+  // UI states
+  const [showQuickStats, setShowQuickStats] = useState<boolean>(true);
+  const [viewMode, setViewMode] = useState<'grid' | 'compact'>('grid');
+  const [showFilters, setShowFilters] = useState<boolean>(false);
+  
   // Refs
   const clickSoundRef = useRef<HTMLAudioElement | null>(null);
+  const confirmSoundRef = useRef<HTMLAudioElement | null>(null);
+  const selectSoundRef = useRef<HTMLAudioElement | null>(null);
 
   // Initialize and fetch data
   useEffect(() => {
     // Initialize audio
     clickSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-casino-bling-achievement-2067.mp3');
-    if (clickSoundRef.current) {
-      clickSoundRef.current.load();
-    }
+    confirmSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-winning-chimes-2015.mp3');
+    selectSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-select-click-1109.mp3');
+    
+    [clickSoundRef.current, confirmSoundRef.current, selectSoundRef.current].forEach(audio => {
+      if (audio) audio.load();
+    });
 
     // Fetch initial data
     checkAuthAndLoadData();
@@ -105,7 +139,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       };
       setCurrentUser(user);
       
-      // Update verification
       if (!userVerification?.verified) {
         setUserVerification({
           verified: true,
@@ -114,10 +147,8 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         });
       }
       
-      // Store in localStorage for backup
       localStorage.setItem('currentUser', JSON.stringify(user));
     } else if (!isLoggedIn && currentUser) {
-      // User logged out from store
       console.log('🔄 Store logged out, clearing local user');
       setCurrentUser(null);
       setUserVerification(null);
@@ -125,19 +156,44 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     }
   }, [storeUser, isLoggedIn]);
 
-  // Check authentication and load user data
+  // Filter and sort cartelas
+  useEffect(() => {
+    let result = [...cartelas];
+    
+    // Apply search filter
+    if (searchTerm) {
+      result = result.filter(c => 
+        c.cartela_number.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    
+    // Apply sorting
+    result.sort((a, b) => {
+      if (sortBy === 'number') {
+        const numA = parseInt(a.cartela_number);
+        const numB = parseInt(b.cartela_number);
+        return sortOrder === 'asc' ? numA - numB : numB - numA;
+      } else {
+        // Sort by availability (available first)
+        if (a.is_available === b.is_available) return 0;
+        if (a.is_available) return sortOrder === 'asc' ? -1 : 1;
+        return sortOrder === 'asc' ? 1 : -1;
+      }
+    });
+    
+    setFilteredCartelas(result);
+  }, [cartelas, searchTerm, sortBy, sortOrder]);
+
   const checkAuthAndLoadData = async () => {
     setUserLoading(true);
     try {
       console.log('🔐 Checking authentication...');
       
-      // First, check if we have a valid token in localStorage (from store)
       const token = localStorage.getItem('token');
       const storedUser = localStorage.getItem('currentUser');
       
       if (token && storedUser) {
         try {
-          // Verify token with API
           const response = await fetch('/api/auth/secure-check', {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -170,11 +226,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
               timestamp: new Date().toISOString()
             });
             
-            // Update store if needed
-            if (!storeUser || storeUser.id !== user.id) {
-              // Store user in localStorage for component use
-              localStorage.setItem('currentUser', JSON.stringify(user));
-            }
+            localStorage.setItem('currentUser', JSON.stringify(user));
             
             setUserLoading(false);
             return;
@@ -184,7 +236,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         }
       }
       
-      // If no valid token, check if store has user
       if (storeUser && isLoggedIn) {
         console.log('✅ Using store user:', storeUser.username);
         const user: User = {
@@ -213,13 +264,11 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         return;
       }
       
-      // Try Telegram auth as fallback
       console.log('🔄 Trying Telegram auth...');
       const telegramSuccess = await initializeTelegramAuth();
       
       if (telegramSuccess) {
         console.log('✅ Telegram auth successful');
-        // Store will update, useEffect will handle the rest
       } else {
         console.log('❌ No authentication found');
         setCurrentUser(null);
@@ -243,7 +292,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     }
   };
 
-  // Fetch cartelas
   const fetchCartelas = async () => {
     try {
       const response = await fetch('/api/game/cartelas');
@@ -258,37 +306,44 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     }
   };
 
-  // Play sound
-  const playSound = useCallback(() => {
-    if (!soundEnabled || !clickSoundRef.current) return;
+  const playSound = useCallback((soundType: 'click' | 'confirm' | 'select' = 'click') => {
+    if (!soundEnabled) return;
     try {
-      clickSoundRef.current.currentTime = 0;
-      clickSoundRef.current.volume = 0.3;
-      clickSoundRef.current.play().catch(e => console.log("Audio play failed:", e));
+      let sound;
+      switch(soundType) {
+        case 'confirm': sound = confirmSoundRef.current; break;
+        case 'select': sound = selectSoundRef.current; break;
+        default: sound = clickSoundRef.current;
+      }
+      
+      if (sound) {
+        sound.currentTime = 0;
+        sound.volume = 0.3;
+        sound.play().catch(e => console.log("Audio play failed:", e));
+      }
     } catch (error) {
       console.log("Sound error:", error);
     }
   }, [soundEnabled]);
 
-  // Toggle sound
   const toggleSound = useCallback(() => {
     setSoundEnabled(prev => !prev);
   }, []);
 
-  // Handle cartela selection
   const handleCartelaSelect = async (cartela: Cartela) => {
     if (!cartela.is_available) {
+      playSound('click');
       alert(`Cartela ${cartela.cartela_number} is already taken`);
       return;
     }
     
     if (!currentUser) {
       alert('Please login to select a cartela');
-      checkAuthAndLoadData(); // Try to re-auth
+      checkAuthAndLoadData();
       return;
     }
     
-    playSound();
+    playSound('select');
     setSelectedCartela(cartela);
     setIsLoading(true);
     
@@ -326,7 +381,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     }
   };
 
-  // Confirm and start game
+  // SIMPLIFIED: Direct function to start bingo game
   const confirmAndStartGame = async () => {
     if (!selectedCartela || !generatedCardData) {
       alert('Please select a cartela first');
@@ -339,13 +394,11 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       return;
     }
     
-    console.log('🚀 Starting game for user:', {
-      username: currentUser.username,
-      userId: currentUser.id,
-      cartela: selectedCartela.cartela_number
-    });
+    console.log('🎮 Starting BINGO game with cartela:', selectedCartela.cartela_number);
+    console.log('🎯 User:', currentUser.username);
+    console.log('🎲 Generated card data:', generatedCardData);
     
-    playSound();
+    playSound('confirm');
     setIsLoading(true);
     
     try {
@@ -363,95 +416,105 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
           username: currentUser.username,
           firstName: currentUser.firstName,
           cardData: generatedCardData,
-          saveGame: true
+          saveGame: true,
+          startGame: true
         })
       });
       
       const data = await response.json();
-      console.log('🎮 Game start response:', data);
+      console.log('🎮 Game start API response:', data);
       
       if (data.success) {
-        // Store game data
+        // Create simple game data
         const gameData = {
-          gameState: data.gameState,
-          cardData: data.cardData,
+          gameId: data.gameId || `game_${Date.now()}`,
           cartelaNumber: selectedCartela.cartela_number,
-          userId: currentUser.id,
-          user: currentUser,
-          gameId: data.gameId,
-          cardNumber: data.cardNumber,
-          timestamp: new Date().toISOString()
+          cardNumbers: bingoCardNumbers,
+          cardData: data.cardData || generatedCardData,
+          user: {
+            id: currentUser.id,
+            username: currentUser.username,
+            firstName: currentUser.firstName,
+            balance: currentUser.balance
+          },
+          startTime: new Date().toISOString(),
+          status: 'active',
+          drawnNumbers: [],
+          markedNumbers: []
         };
         
+        // Store game data
         localStorage.setItem('bingoGameData', JSON.stringify(gameData));
         
-        // Prepare BingoGame data
-        setBingoGameData({
-          gameState: data.gameState,
-          cardData: data.cardData,
-          stats: {
-            cartelaNumber: selectedCartela.cartela_number,
-            cardNumber: data.cardNumber,
-            userId: currentUser.id,
-            user: currentUser,
-            gameId: data.gameId
-          }
-        });
+        // Set state to show bingo game - THIS IS THE KEY LINE
+        setBingoGameData(gameData);
         
-        // Open BingoGame modal
-        setShowBingoGame(true);
+        // Wait a tiny bit to ensure state is set
+        setTimeout(() => {
+          console.log('🔄 Setting showBingoGame to TRUE');
+          setShowBingoGame(true);
+          setIsLoading(false);
+        }, 100);
         
         // Refresh cartelas
         fetchCartelas();
         
         // Notify parent
         if (onGameStart) {
-          onGameStart({
-            cartela: selectedCartela,
-            bingoCard: data.cardData,
-            gameId: data.gameId,
-            user: currentUser,
-            userId: currentUser.id,
-            cardNumber: data.cardNumber
-          });
+          onGameStart(gameData);
         }
         
-        console.log('✅ Game saved to database for user:', currentUser.username);
+        console.log('✅ BINGO game prepared, should open now');
+        
       } else {
         alert(data.message || 'Failed to start game');
+        setIsLoading(false);
       }
     } catch (error) {
-      console.error('Error starting game:', error);
+      console.error('❌ Error starting game:', error);
       alert('Failed to start game. Please check console for details.');
-    } finally {
       setIsLoading(false);
     }
   };
 
-  // Logout function
+  // Handle bingo game close
+  const handleBingoGameClose = () => {
+    console.log('🎮 Closing BINGO game');
+    setShowBingoGame(false);
+    setBingoGameData(null);
+    
+    // Clear selection
+    setSelectedCartela(null);
+    setBingoCardNumbers([]);
+    setGeneratedCardData(null);
+    
+    // Refresh cartelas
+    fetchCartelas();
+    
+    playSound('click');
+  };
+
   const handleLogout = () => {
     if (confirm('Are you sure you want to logout?')) {
-      // Clear all auth data
       localStorage.removeItem('currentUser');
       localStorage.removeItem('token');
       localStorage.removeItem('auth_token');
+      localStorage.removeItem('bingoGameData');
       
-      // Clear store state
       storeLogout();
       
-      // Clear component state
       setCurrentUser(null);
       setUserVerification(null);
       setSelectedCartela(null);
       setBingoCardNumbers([]);
       setGeneratedCardData(null);
+      setShowBingoGame(false);
+      setBingoGameData(null);
       
-      // Show message
       alert('Logged out successfully.');
     }
   };
 
-  // Refresh all data
   const refreshAll = async () => {
     setIsLoading(true);
     await Promise.all([
@@ -462,542 +525,684 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     alert('Data refreshed!');
   };
 
-  // Handle login redirect
   const handleLoginRedirect = () => {
     window.location.href = '/login';
   };
 
-  // Handle re-authentication
   const handleReauth = async () => {
     setIsLoading(true);
     await checkAuthAndLoadData();
     setIsLoading(false);
   };
 
+  const clearSearch = () => {
+    setSearchTerm('');
+    playSound('click');
+  };
+
+  const toggleSortOrder = () => {
+    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    playSound('click');
+  };
+
+  // Debug: Log when showBingoGame changes
+  useEffect(() => {
+    console.log('🎮 showBingoGame state changed:', showBingoGame);
+    console.log('🎮 bingoGameData:', bingoGameData);
+  }, [showBingoGame, bingoGameData]);
+
   if (userLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-700 mx-auto mb-4"></div>
-          <p className="text-lg font-semibold text-gray-700">Verifying authentication...</p>
-          <p className="text-sm text-gray-500 mt-2">Please wait while we secure your session</p>
+          <div className="relative">
+            <div className="w-20 h-20 mx-auto mb-6">
+              <div className="absolute inset-0 animate-ping rounded-full bg-gradient-to-r from-yellow-400 to-pink-500 opacity-20"></div>
+              <div className="relative w-20 h-20 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
+                <TrophyFill size={32} className="text-white" />
+              </div>
+            </div>
+            <div className="animate-pulse">
+              <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-pink-300 mb-2">
+                BINGO ROYALE
+              </p>
+              <p className="text-lg font-semibold text-white/80">Securing your session...</p>
+              <p className="text-sm text-white/60 mt-2">Preparing your gaming experience</p>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      {/* BingoGame Modal */}
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900 p-3 md:p-6 relative overflow-hidden">
+      {/* BINGO Game Component - RENDERED CONDITIONALLY */}
       {showBingoGame && bingoGameData && (
-        <div className="fixed inset-0 bg-black/95 z-50 overflow-y-auto p-4">
-          <div className="max-w-6xl mx-auto">
-            <button
-              onClick={() => setShowBingoGame(false)}
-              className="fixed top-4 right-4 z-50 px-4 py-2 bg-red-600 text-white rounded-full flex items-center gap-2 hover:bg-red-700 transition-colors shadow-lg"
-            >
-              <BoxArrowRight /> Back to Card Picker
-            </button>
-            
-            <BingoGame 
-              initialData={bingoGameData}
-              onClose={() => setShowBingoGame(false)}
-            />
-          </div>
+        <div className="fixed inset-0 z-50">
+          <BingoGame 
+            initialData={bingoGameData}
+            onClose={handleBingoGameClose}
+          />
         </div>
       )}
 
-      {/* Sound Control */}
-      <div 
-        className="fixed bottom-6 right-6 bg-black/70 rounded-full w-12 h-12 flex items-center justify-center cursor-pointer border-2 border-yellow-400 z-30 shadow-lg"
-        onClick={toggleSound}
-        title={soundEnabled ? "Mute sound" : "Unmute sound"}
-      >
-        {soundEnabled ? (
-          <VolumeUpFill size={24} color="white" />
-        ) : (
-          <VolumeMuteFill size={24} color="white" />
-        )}
+      {/* Control Buttons */}
+      <div className="fixed bottom-6 right-6 flex flex-col gap-3 z-30">
+        <div 
+          className="relative group"
+          onClick={toggleSound}
+          title={soundEnabled ? "Mute sound" : "Unmute sound"}
+        >
+          <div className="absolute inset-0 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full blur opacity-0 group-hover:opacity-70 transition-opacity"></div>
+          <div className="relative w-14 h-14 bg-black/70 rounded-full flex items-center justify-center cursor-pointer border-2 border-yellow-400 shadow-xl backdrop-blur-sm">
+            {soundEnabled ? (
+              <VolumeUpFill size={26} className="text-white" />
+            ) : (
+              <VolumeMuteFill size={26} className="text-white" />
+            )}
+          </div>
+        </div>
+        
+        <div className="relative group">
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full blur opacity-0 group-hover:opacity-70 transition-opacity"></div>
+          <button
+            onClick={refreshAll}
+            disabled={isLoading || showBingoGame}
+            className="relative w-14 h-14 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-full flex items-center justify-center hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm disabled:opacity-50"
+            title="Refresh all data"
+          >
+            <ArrowClockwise className={`text-white ${isLoading ? "animate-spin" : ""}`} size={24} />
+          </button>
+        </div>
       </div>
 
-      {/* Refresh Button */}
-      <button
-        onClick={refreshAll}
-        disabled={isLoading}
-        className="fixed top-4 left-4 z-30 px-4 py-2 bg-indigo-600 text-white rounded-full flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-lg disabled:opacity-50"
-        title="Refresh all data"
-      >
-        <ArrowClockwise className={isLoading ? "animate-spin" : ""} />
-        Refresh
-      </button>
-
-      {/* Logout Button (if logged in) */}
-      {currentUser && (
-        <button
-          onClick={handleLogout}
-          className="fixed top-4 left-32 z-30 px-4 py-2 bg-red-600 text-white rounded-full flex items-center gap-2 hover:bg-red-700 transition-colors shadow-lg"
-          title="Logout"
-        >
-          <BoxArrowRight size={16} />
-          Logout
-        </button>
+      {/* Top Action Buttons */}
+      {currentUser && !showBingoGame && (
+        <div className="fixed top-4 left-4 z-30 flex gap-2">
+          <button
+            onClick={handleLogout}
+            disabled={isLoading}
+            className="px-4 py-2.5 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-full flex items-center gap-2 hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm text-sm disabled:opacity-50"
+            title="Logout"
+          >
+            <BoxArrowRight size={16} />
+            Logout
+          </button>
+          <button
+            onClick={() => setShowQuickStats(!showQuickStats)}
+            disabled={isLoading}
+            className="px-4 py-2.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full flex items-center gap-2 hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm text-sm disabled:opacity-50"
+          >
+            <TrophyFill size={16} />
+            {showQuickStats ? 'Hide Stats' : 'Show Stats'}
+          </button>
+        </div>
       )}
 
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-700 text-white rounded-2xl p-6 mb-8 shadow-xl">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <ShieldCheck size={32} className="text-green-300" />
-            <h1 className="text-3xl font-bold text-center">
-              BINGO CARD PICKER
-            </h1>
-            <ShieldCheck size={32} className="text-green-300" />
-          </div>
-          
-          <p className="text-center text-lg opacity-90 mb-6">
-            Select a cartela to generate your BINGO card
-          </p>
-          
-          {/* User Info Section */}
-          <div className="mt-6">
-            {currentUser ? (
-              <div className="flex flex-col items-center">
-                <div className="inline-flex items-center gap-4 bg-white/20 rounded-2xl px-6 py-4">
-                  <div className="flex items-center gap-4">
-                    <div className="relative">
-                      <PersonCircle size={40} />
-                      {userVerification?.verified && (
-                        <div className="absolute -top-1 -right-1 bg-green-500 rounded-full p-1">
-                          <ShieldCheck size={12} />
-                        </div>
-                      )}
+      <div className="max-w-7xl mx-auto relative z-10">
+        {/* Only show card picker content when bingo game is NOT showing */}
+        {!showBingoGame ? (
+          <>
+            {/* Header */}
+            <div className="relative overflow-hidden rounded-3xl mb-6 md:mb-8">
+              <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 via-pink-600/20 to-indigo-600/20 backdrop-blur-sm"></div>
+              <div className="relative bg-gradient-to-r from-indigo-700/90 via-purple-700/90 to-pink-700/90 text-white rounded-3xl p-6 md:p-8 shadow-2xl border border-white/10">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="text-center md:text-left">
+                    <div className="flex items-center justify-center md:justify-start gap-3 mb-4">
+                      <div className="relative">
+                        <TrophyFill size={36} className="text-yellow-300 animate-pulse" />
+                      </div>
+                      <h1 className="text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-yellow-300 to-pink-300">
+                        BINGO ROYALE
+                      </h1>
+                      <div className="relative">
+                        <TrophyFill size={36} className="text-yellow-300 animate-pulse" />
+                      </div>
                     </div>
-                    <div className="text-left">
-                      <p className="font-bold text-xl">{currentUser.firstName}</p>
-                      <p className="opacity-90">
-                        @{currentUser.username} • 
-                        <span className="font-bold ml-1">${currentUser.balance?.toFixed(2)}</span>
-                        {currentUser.bonusBalance && currentUser.bonusBalance > 0 && (
-                          <span className="ml-2 text-yellow-300">(+${currentUser.bonusBalance?.toFixed(2)} bonus)</span>
-                        )}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs px-2 py-0.5 bg-green-500/30 rounded-full">
-                          {userVerification?.verified ? '✅ Verified' : '⚠️ Unverified'}
-                        </span>
-                        {currentUser.role === 'admin' && (
-                          <span className="text-xs px-2 py-0.5 bg-yellow-500/30 rounded-full">
-                            ⭐ ADMIN
-                          </span>
-                        )}
-                        <span className="text-xs px-2 py-0.5 bg-blue-500/30 rounded-full">
-                          {userVerification?.source?.replace(/_/g, ' ')}
-                        </span>
+                    
+                    <p className="text-lg opacity-90 mb-2">
+                      Select your lucky cartela and start winning!
+                    </p>
+                    <p className="text-sm opacity-70">
+                      Premium gaming experience with enhanced rewards
+                    </p>
+                  </div>
+                  
+                  {/* User Info */}
+                  {currentUser ? (
+                    <div className="flex flex-col items-center md:items-end gap-3">
+                      <div className="relative group">
+                        <div className="absolute inset-0 bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl blur opacity-0 group-hover:opacity-50 transition-opacity"></div>
+                        <div className="relative bg-black/30 backdrop-blur-sm rounded-2xl px-6 py-4 border border-white/20">
+                          <div className="flex items-center gap-4">
+                            <div className="relative">
+                              <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
+                                <PersonCircle size={28} className="text-white" />
+                              </div>
+                              {userVerification?.verified && (
+                                <div className="absolute -top-1 -right-1 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full p-1 shadow-lg">
+                                  <ShieldCheck size={14} className="text-white" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-left">
+                              <p className="font-bold text-xl flex items-center gap-2">
+                                {currentUser.firstName}
+                                {currentUser.role === 'admin' && (
+                                  <span className="text-xs px-2 py-0.5 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full">
+                                    ADMIN
+                                  </span>
+                                )}
+                              </p>
+                              <p className="opacity-90 text-sm">
+                                @{currentUser.username}
+                              </p>
+                              <div className="flex items-center gap-3 mt-2">
+                                <div className="flex items-center gap-1 bg-black/30 rounded-full px-3 py-1">
+                                  <Coin size={14} className="text-yellow-400" />
+                                  <span className="font-bold">${currentUser.balance?.toFixed(2)}</span>
+                                </div>
+                                {currentUser.bonusBalance && currentUser.bonusBalance > 0 && (
+                                  <div className="flex items-center gap-1 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-full px-3 py-1">
+                                    <GiftFill size={14} className="text-orange-300" />
+                                    <span className="font-bold text-yellow-300">+${currentUser.bonusBalance?.toFixed(2)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="text-center">
+                        <ShieldCheck size={48} className="text-red-300 mx-auto mb-2" />
+                        <p className="font-bold text-xl mb-2">Authentication Required</p>
+                        <p className="opacity-90">Login to access premium features</p>
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={handleReauth}
+                          disabled={isLoading}
+                          className="px-5 py-2.5 bg-gradient-to-r from-white/20 to-white/10 rounded-lg hover:bg-white/30 disabled:opacity-50 transition-all backdrop-blur-sm"
+                        >
+                          Re-authenticate
+                        </button>
+                        <button
+                          onClick={handleLoginRedirect}
+                          className="px-5 py-2.5 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg font-semibold hover:shadow-lg transition-all"
+                        >
+                          Login Now
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Stats (Collapsible) */}
+            {showQuickStats && currentUser && (
+              <div className="mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-gradient-to-br from-purple-600/20 to-pink-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-white/70 mb-1">Available Cartelas</p>
+                        <p className="text-3xl font-bold text-white">
+                          {cartelas.filter(c => c.is_available).length}
+                          <span className="text-sm text-white/50"> / {cartelas.length}</span>
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center">
+                        <Grid3x3GapFill size={24} className="text-white" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-blue-600/20 to-cyan-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-white/70 mb-1">Your Balance</p>
+                        <p className="text-3xl font-bold text-white">
+                          ${currentUser.balance?.toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 flex items-center justify-center">
+                        <Coin size={24} className="text-white" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-green-600/20 to-emerald-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-white/70 mb-1">Bonus Balance</p>
+                        <p className="text-3xl font-bold text-white">
+                          ${currentUser.bonusBalance?.toFixed(2) || '0.00'}
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 flex items-center justify-center">
+                        <GiftFill size={24} className="text-white" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-yellow-600/20 to-orange-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-white/70 mb-1">Selected Cartela</p>
+                        <p className="text-3xl font-bold text-white">
+                          {selectedCartela?.cartela_number || '--'}
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
+                        <TrophyFill size={24} className="text-white" />
                       </div>
                     </div>
                   </div>
                 </div>
-                
-                {/* Security Status */}
-                <div className="mt-4 text-center">
-                  {userVerification?.verified ? (
-                    <p className="text-sm text-green-300">
-                      🔐 Authenticated as {currentUser.firstName}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-yellow-300">
-                      ⚠️ Using cached session. Please re-authenticate.
-                    </p>
-                  )}
-                  <p className="text-xs opacity-70 mt-1">
-                    User ID: {currentUser.id?.substring(0, 12)}...
-                  </p>
-                </div>
               </div>
-            ) : (
-              <div className="text-center">
-                <div className="inline-flex flex-col items-center gap-3 bg-red-500/30 rounded-2xl px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    <ShieldCheck size={32} className="text-red-300" />
-                    <div className="text-left">
-                      <p className="font-bold text-xl">Authentication Required</p>
-                      <p className="opacity-90">Please login to play BINGO</p>
+            )}
+
+            {/* Main Content */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
+              {/* Left Column - Cartela Selection */}
+              <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-sm rounded-3xl shadow-2xl p-5 md:p-6 border border-white/10">
+                {/* Controls Header */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white mb-2">Available Cartelas</h2>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-white/70">
+                        {filteredCartelas.filter(c => c.is_available).length} available
+                      </span>
+                      <button
+                        onClick={() => setShowFilters(!showFilters)}
+                        className="px-3 py-1 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 rounded-full text-sm text-white/90 hover:bg-blue-500/30 transition-all"
+                      >
+                        <Filter size={14} className="inline mr-1" />
+                        {showFilters ? 'Hide Filters' : 'Show Filters'}
+                      </button>
                     </div>
                   </div>
                   
-                  <div className="mt-3 flex gap-3">
+                  {/* View Toggle */}
+                  <div className="flex items-center gap-2">
+                    <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-full p-1">
+                      <button
+                        onClick={() => setViewMode('grid')}
+                        className={`px-4 py-2 rounded-full transition-all ${
+                          viewMode === 'grid' 
+                            ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg' 
+                            : 'text-white/70 hover:text-white'
+                        }`}
+                      >
+                        Grid
+                      </button>
+                      <button
+                        onClick={() => setViewMode('compact')}
+                        className={`px-4 py-2 rounded-full transition-all ${
+                          viewMode === 'compact' 
+                            ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg' 
+                            : 'text-white/70 hover:text-white'
+                        }`}
+                      >
+                        Compact
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Filters */}
+                {showFilters && (
+                  <div className="mb-6 p-4 bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-2xl backdrop-blur-sm border border-white/10">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Search */}
+                      <div className="relative">
+                        <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
+                          <Search size={20} className="text-white/50" />
+                        </div>
+                        <input
+                          type="text"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          placeholder="Search cartela number..."
+                          className="w-full pl-10 pr-10 py-3 bg-black/30 backdrop-blur-sm rounded-xl border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all"
+                        />
+                        {searchTerm && (
+                          <button
+                            onClick={clearSearch}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/50 hover:text-white"
+                          >
+                            <XCircle size={20} />
+                          </button>
+                        )}
+                      </div>
+                      
+                      {/* Sort Controls */}
+                      <div className="flex items-center gap-3">
+                        <select
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value as 'number' | 'availability')}
+                          className="flex-1 px-4 py-3 bg-black/30 backdrop-blur-sm rounded-xl border border-white/20 text-white focus:outline-none focus:border-purple-500 transition-all"
+                        >
+                          <option value="number">Sort by Number</option>
+                          <option value="availability">Sort by Availability</option>
+                        </select>
+                        <button
+                          onClick={toggleSortOrder}
+                          className="px-4 py-3 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-xl border border-white/20 hover:bg-purple-500/30 transition-all"
+                          title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                        >
+                          {sortOrder === 'asc' ? (
+                            <SortNumericDown size={20} className="text-white" />
+                          ) : (
+                            <SortNumericUpAlt size={20} className="text-white" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Cartela Grid */}
+                <div className={`grid gap-3 ${
+                  viewMode === 'compact' 
+                    ? 'grid-cols-8 md:grid-cols-10 lg:grid-cols-12' 
+                    : 'grid-cols-6 md:grid-cols-8 lg:grid-cols-10'
+                } max-h-[400px] overflow-y-auto p-3 bg-gradient-to-br from-black/20 to-black/10 rounded-2xl`}>
+                  {filteredCartelas.length === 0 ? (
+                    <div className="col-span-full text-center py-10">
+                      <Search size={48} className="text-white/30 mx-auto mb-4" />
+                      <p className="text-white/50">No cartelas found</p>
+                    </div>
+                  ) : (
+                    filteredCartelas.map((cartela) => (
+                      <div
+                        key={cartela.id}
+                        className={`relative group ${viewMode === 'compact' ? 'h-10' : 'h-12'}`}
+                        onClick={() => cartela.is_available && handleCartelaSelect(cartela)}
+                      >
+                        <div className={`absolute inset-0 rounded-lg transition-all duration-300 ${
+                          cartela.is_available
+                            ? 'bg-gradient-to-br from-blue-500/20 to-purple-500/20 group-hover:from-blue-500/30 group-hover:to-purple-500/30'
+                            : 'bg-gradient-to-br from-red-500/20 to-pink-500/20'
+                        } ${selectedCartela?.id === cartela.id ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-black/50' : ''}`}></div>
+                        
+                        <div className={`relative h-full flex items-center justify-center rounded-lg transition-all duration-300 ${
+                          selectedCartela?.id === cartela.id
+                            ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-black font-bold scale-105'
+                            : cartela.is_available
+                              ? 'bg-gradient-to-br from-white/10 to-white/5 text-white group-hover:bg-white/20 group-hover:scale-105'
+                              : 'bg-gradient-to-br from-red-900/30 to-pink-900/30 text-white/50'
+                        } ${!cartela.is_available ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                          <span className={`${viewMode === 'compact' ? 'text-xs' : 'text-sm'} font-semibold`}>
+                            {cartela.cartela_number}
+                          </span>
+                          
+                          {!cartela.is_available && (
+                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center">
+                              <XCircle size={10} className="text-white" />
+                            </div>
+                          )}
+                          
+                          {selectedCartela?.id === cartela.id && (
+                            <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center animate-pulse shadow-lg">
+                              <StarFill size={12} className="text-white" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                
+                {/* Selection Actions */}
+                {selectedCartela && (
+                  <div className="mt-6 p-5 bg-gradient-to-r from-green-500/10 to-emerald-500/10 backdrop-blur-sm rounded-2xl border border-green-500/20">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center animate-pulse">
+                            <AwardFill size={20} className="text-white" />
+                          </div>
+                          <div>
+                            <p className="text-lg font-bold text-white">
+                              Selected Cartela: <span className="text-2xl text-yellow-300">{selectedCartela.cartela_number}</span>
+                            </p>
+                            <p className="text-green-300 text-sm">
+                              Ready to start as <span className="font-semibold">{currentUser?.firstName}</span>
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setSelectedCartela(null)}
+                          className="px-5 py-2.5 bg-gradient-to-r from-red-500/20 to-pink-500/20 text-white rounded-xl hover:bg-red-500/30 transition-all backdrop-blur-sm border border-red-500/20 flex items-center gap-2"
+                        >
+                          <XCircle size={16} /> Clear
+                        </button>
+                        <button
+                          onClick={confirmAndStartGame}
+                          disabled={isLoading}
+                          className="px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold rounded-xl hover:shadow-2xl hover:scale-105 transition-all disabled:opacity-50 backdrop-blur-sm flex items-center gap-2"
+                        >
+                          {isLoading ? (
+                            <>
+                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                              Starting Game...
+                            </>
+                          ) : (
+                            <>
+                              <PlayCircle size={20} /> 
+                              <span className="hidden md:inline">Start BINGO Game</span>
+                              <span className="md:hidden">Play BINGO</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Right Column - BINGO Card Preview */}
+              <div className="bg-gradient-to-br from-yellow-500/10 via-orange-500/10 to-red-500/10 backdrop-blur-sm rounded-3xl shadow-2xl p-5 md:p-6 border border-yellow-500/20">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center">
+                      <CardChecklist size={24} className="text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold text-white">BINGO Card Preview</h3>
+                      <p className="text-sm text-white/70">Your lucky numbers are here!</p>
+                    </div>
+                  </div>
+                  
+                  {selectedCartela && (
+                    <div className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full font-bold text-white shadow-lg">
+                      Cartela #{selectedCartela.cartela_number}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="mb-6">
+                  {/* BINGO Letters Header */}
+                  <div className="grid grid-cols-5 gap-3 mb-4">
+                    {['B', 'I', 'N', 'G', 'O'].map((letter, index) => (
+                      <div 
+                        key={letter}
+                        className="aspect-square bg-gradient-to-br from-purple-700 to-pink-700 rounded-xl flex items-center justify-center text-white text-xl md:text-2xl font-bold shadow-lg relative overflow-hidden group"
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <span className="relative">{letter}</span>
+                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-400 to-orange-400 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* BINGO Card Grid */}
+                  <div className="grid grid-cols-5 gap-3 min-h-[300px]">
+                    {isLoading ? (
+                      <div className="col-span-5 flex items-center justify-center">
+                        <div className="text-center">
+                          <div className="relative">
+                            <div className="w-16 h-16 mx-auto mb-4">
+                              <div className="absolute inset-0 animate-ping rounded-full bg-gradient-to-r from-yellow-400 to-orange-500 opacity-20"></div>
+                              <div className="relative w-16 h-16 rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 flex items-center justify-center">
+                                <LightningChargeFill size={32} className="text-white animate-pulse" />
+                              </div>
+                            </div>
+                            <p className="text-white/80">Generating your lucky card...</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : bingoCardNumbers.length > 0 ? (
+                      bingoCardNumbers.map((cellNumber, index) => (
+                        <div
+                          key={index}
+                          className={`relative group ${index === 12 ? 'free-space' : ''}`}
+                        >
+                          <div className={`absolute inset-0 rounded-xl transition-all duration-300 ${
+                            index === 12
+                              ? 'bg-gradient-to-br from-yellow-400 to-orange-500'
+                              : 'bg-gradient-to-br from-white/10 to-white/5 group-hover:bg-white/20'
+                          }`}></div>
+                          
+                          <div className={`relative aspect-square flex items-center justify-center rounded-xl transition-all duration-300 ${
+                            index === 12
+                              ? 'text-black font-bold text-lg'
+                              : 'text-white font-semibold text-lg group-hover:scale-110'
+                          }`}>
+                            {cellNumber}
+                            {index === 12 && (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-xs text-center px-2">FREE</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="col-span-5 flex items-center justify-center text-center">
+                        <div className="text-white/50">
+                          <div className="text-5xl mb-4 opacity-20 font-bold">BINGO</div>
+                          <p className="text-lg mb-2">Select a cartela to see</p>
+                          <p className="text-sm">your 5×5 BINGO card preview</p>
+                          <div className="mt-6">
+                            <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-full">
+                              <StarFill size={16} className="text-yellow-400" />
+                              <span className="text-sm">Premium Experience</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Game Instructions */}
+                <div className="mt-6 p-4 bg-gradient-to-r from-blue-500/10 to-cyan-500/10 rounded-2xl backdrop-blur-sm border border-blue-500/20">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0">
+                      <LightningChargeFill size={20} className="text-white" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-white mb-1">How to Play BINGO</p>
+                      <p className="text-sm text-white/70">
+                        1. Select a cartela number from the grid<br />
+                        2. Preview your BINGO card with lucky numbers<br />
+                        3. Click "Start BINGO Game" to begin playing<br />
+                        4. Numbers will be drawn automatically<br />
+                        5. Mark matching numbers on your card<br />
+                        6. Complete a line (row, column, diagonal) to WIN!
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Resume Game Button */}
+            {currentUser && localStorage.getItem('bingoGameData') && (
+              <div className="mt-6 text-center">
+                <button
+                  onClick={() => {
+                    try {
+                      const savedGame = JSON.parse(localStorage.getItem('bingoGameData') || '{}');
+                      console.log('🎮 Resuming saved game:', savedGame.gameId);
+                      setBingoGameData(savedGame);
+                      setShowBingoGame(true);
+                      playSound('confirm');
+                    } catch (error) {
+                      console.error('Error loading saved game:', error);
+                      alert('Could not load saved game');
+                    }
+                  }}
+                  className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-bold hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2 mx-auto"
+                >
+                  <PlayCircle size={20} />
+                  Resume Previous BINGO Game
+                </button>
+              </div>
+            )}
+            
+            {/* Footer Security Info */}
+            {currentUser && (
+              <div className="mt-6 md:mt-8 p-4 md:p-5 bg-gradient-to-r from-green-500/10 to-emerald-500/10 backdrop-blur-sm rounded-2xl border border-green-500/20">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center">
+                      <ShieldCheck size={20} className="text-white" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-white">Secure Session Active</p>
+                      <p className="text-sm text-green-300">
+                        Playing as: {currentUser.firstName} • 
+                        Verified via: {userVerification?.source?.replace(/_/g, ' ') || 'Premium Auth'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-sm text-white/70">
+                      Session ID: {currentUser.id?.substring(0, 8)}...
+                    </div>
                     <button
-                      onClick={handleReauth}
-                      disabled={isLoading}
-                      className="px-4 py-2 bg-white/20 rounded-lg hover:bg-white/30 disabled:opacity-50"
+                      onClick={handleLogout}
+                      className="px-4 py-2 text-sm bg-gradient-to-r from-red-500/20 to-pink-500/20 text-white rounded-full hover:bg-red-500/30 transition-all"
                     >
-                      Try Re-authenticate
-                    </button>
-                    <button
-                      onClick={handleLoginRedirect}
-                      className="px-4 py-2 bg-white text-indigo-700 rounded-lg font-semibold hover:bg-gray-100"
-                    >
-                      Go to Login Page
+                      Logout Session
                     </button>
                   </div>
                 </div>
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Main Content - Only show if user is logged in */}
-        {currentUser ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Left Column - Cartela Selection */}
-            <div className="bg-white rounded-2xl shadow-xl p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-indigo-700">Available Cartelas</h2>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">
-                    {cartelas.filter(c => c.is_available).length} of {cartelas.length} available
-                  </span>
-                  <button
-                    onClick={fetchCartelas}
-                    disabled={isLoading}
-                    className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full flex items-center gap-1 hover:bg-indigo-200 text-sm"
-                    title="Refresh cartelas"
-                  >
-                    <ArrowClockwise size={14} className={isLoading ? "animate-spin" : ""} />
-                  </button>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3 max-h-[400px] overflow-y-auto p-3 bg-gray-50 rounded-xl">
-                {cartelas.length === 0 ? (
-                  <div className="col-span-full text-center py-10 text-gray-500">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-700 mx-auto mb-3"></div>
-                    <p>Loading cartelas...</p>
-                  </div>
-                ) : (
-                  cartelas.map((cartela) => (
-                    <div
-                      key={cartela.id}
-                      className={`cartela-cell ${!cartela.is_available ? 'unavailable' : ''} 
-                        ${selectedCartela?.id === cartela.id ? 'selected' : ''}`}
-                      onClick={() => cartela.is_available && handleCartelaSelect(cartela)}
-                      title={cartela.is_available ? `Select ${cartela.cartela_number}` : 'Already taken'}
-                    >
-                      {cartela.cartela_number}
-                      {!cartela.is_available && (
-                        <span className="unavailable-badge">Taken</span>
-                      )}
-                      {selectedCartela?.id === cartela.id && (
-                        <span className="selected-badge">✓</span>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-              
-              {selectedCartela && (
-                <div className="mt-6 p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border-2 border-green-200">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                      <p className="text-green-800 font-semibold">
-                        Selected Cartela: <span className="text-2xl font-bold">{selectedCartela.cartela_number}</span>
-                      </p>
-                      <p className="text-green-600 text-sm">
-                        ✅ Ready to start game as <span className="font-semibold">{currentUser.firstName}</span>
-                      </p>
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => setSelectedCartela(null)}
-                        className="px-4 py-2 bg-red-100 text-red-700 rounded-full flex items-center gap-2 hover:bg-red-200 transition-colors"
-                        disabled={isLoading}
-                      >
-                        <XCircle size={16} /> Clear
-                      </button>
-                      <button
-                        onClick={confirmAndStartGame}
-                        disabled={isLoading}
-                        className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold rounded-full flex items-center gap-2 hover:shadow-lg hover:scale-[1.02] transition-all disabled:opacity-50"
-                      >
-                        {isLoading ? (
-                          <>
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                            Processing...
-                          </>
-                        ) : (
-                          <>
-                            <PlayCircle size={20} /> Confirm & Start Game
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              {/* Quick Stats */}
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="text-center p-3 bg-blue-50 rounded-lg">
-                    <div className="text-2xl font-bold text-indigo-700">{cartelas.length}</div>
-                    <div className="text-sm text-gray-600">Total Cartelas</div>
-                  </div>
-                  <div className="text-center p-3 bg-green-50 rounded-lg">
-                    <div className="text-2xl font-bold text-green-700">
-                      {cartelas.filter(c => c.is_available).length}
-                    </div>
-                    <div className="text-sm text-gray-600">Available</div>
-                  </div>
-                  <div className="text-center p-3 bg-purple-50 rounded-lg">
-                    <div className="text-2xl font-bold text-purple-700">
-                      {selectedCartela ? 1 : 0}
-                    </div>
-                    <div className="text-sm text-gray-600">Selected</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Right Column - BINGO Card Preview */}
-            <div className="bg-gradient-to-br from-yellow-50 to-amber-100 rounded-2xl shadow-xl p-6 border-4 border-indigo-600">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-2xl font-bold text-indigo-700 flex items-center gap-2">
-                  <CardChecklist /> BINGO Card Preview
-                </h3>
-                {selectedCartela && (
-                  <span className="px-4 py-1 bg-indigo-600 text-white rounded-full font-bold">
-                    Cartela #{selectedCartela.cartela_number}
-                  </span>
-                )}
-              </div>
-              
-              <div className="mb-6">
-                {/* BINGO Letters Header */}
-                <div className="grid grid-cols-5 gap-2 mb-2">
-                  {['B', 'I', 'N', 'G', 'O'].map((letter) => (
-                    <div 
-                      key={letter}
-                      className="aspect-square bg-gradient-to-br from-indigo-700 to-purple-800 rounded-lg flex items-center justify-center text-white text-xl font-bold shadow-md"
-                    >
-                      {letter}
-                    </div>
-                  ))}
-                </div>
-                
-                {/* BINGO Card Grid */}
-                <div className="grid grid-cols-5 gap-2 min-h-[300px]">
-                  {isLoading ? (
-                    <div className="col-span-5 flex items-center justify-center">
-                      <div className="text-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-700 mx-auto"></div>
-                        <p className="mt-4 text-gray-600">Generating BINGO card...</p>
-                      </div>
-                    </div>
-                  ) : bingoCardNumbers.length > 0 ? (
-                    bingoCardNumbers.map((cellNumber, index) => (
-                      <div
-                        key={index}
-                        className={`bingo-5x5-cell ${index === 12 ? 'free-space' : ''}`}
-                      >
-                        {cellNumber}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="col-span-5 flex items-center justify-center text-center">
-                      <div className="text-gray-500">
-                        <div className="text-4xl mb-4 opacity-30">BINGO</div>
-                        <p className="text-lg">Select a cartela to preview</p>
-                        <p className="text-sm mt-2">your 5×5 BINGO card</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              {/* Card Info */}
-              <div className="grid grid-cols-3 gap-4 mt-6">
-                <div className="text-center p-3 bg-white/50 rounded-lg">
-                  <div className="text-2xl font-bold text-indigo-700">
-                    ${currentUser.balance?.toFixed(2)}
-                  </div>
-                  <div className="text-sm text-gray-600">Your Balance</div>
-                </div>
-                <div className="text-center p-3 bg-white/50 rounded-lg">
-                  <div className="text-2xl font-bold text-indigo-700">
-                    {selectedCartela ? selectedCartela.cartela_number : '--'}
-                  </div>
-                  <div className="text-sm text-gray-600">Selected Cartela</div>
-                </div>
-                <div className="text-center p-3 bg-white/50 rounded-lg">
-                  <div className="text-2xl font-bold text-indigo-700">
-                    {userVerification?.verified ? '✅' : '⚠️'}
-                  </div>
-                  <div className="text-sm text-gray-600">Security Status</div>
-                </div>
-              </div>
-            </div>
-          </div>
+          </>
         ) : (
-          // Show login prompt if not authenticated
-          <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
-            <div className="max-w-md mx-auto">
-              <ShieldCheck size={64} className="text-red-400 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-gray-800 mb-3">Authentication Required</h2>
-              <p className="text-gray-600 mb-6">
-                You need to be logged in to access the BINGO game. 
-                Please login to continue.
-              </p>
-              <div className="space-y-3">
-                <button
-                  onClick={handleReauth}
-                  disabled={isLoading}
-                  className="w-full py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {isLoading ? 'Trying to login...' : 'Try Automatic Login'}
-                </button>
-                <button
-                  onClick={handleLoginRedirect}
-                  className="w-full py-3 border border-indigo-600 text-indigo-600 rounded-lg hover:bg-indigo-50"
-                >
-                  Go to Login Page
-                </button>
+          // Show loading message when game is being prepared
+          <div className="text-center py-20">
+            <div className="w-24 h-24 mx-auto mb-6">
+              <div className="absolute inset-0 animate-ping rounded-full bg-gradient-to-r from-green-500 to-emerald-500 opacity-20"></div>
+              <div className="relative w-24 h-24 rounded-full bg-gradient-to-r from-green-600 to-emerald-600 flex items-center justify-center">
+                <Stars size={40} className="text-white animate-pulse" />
               </div>
             </div>
-          </div>
-        )}
-        
-        {/* Footer Security Info */}
-        {currentUser && (
-          <div className="mt-8 p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <ShieldCheck className="text-green-600" />
-                <div>
-                  <p className="font-semibold text-green-800">Secure Session Active</p>
-                  <p className="text-sm text-green-600">
-                    Playing as: {currentUser.firstName} (@{currentUser.username}) • 
-                    Verified via: {userVerification?.source?.replace(/_/g, ' ') || 'unknown'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 text-sm bg-red-100 text-red-700 rounded-full hover:bg-red-200"
-              >
-                Logout
-              </button>
+            <h3 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-300 to-emerald-300 mb-4">
+              Opening BINGO Game...
+            </h3>
+            <p className="text-white/80 text-lg">Please wait while we load your game</p>
+            <div className="mt-6">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-400 mx-auto"></div>
             </div>
           </div>
         )}
       </div>
-
-      {/* CSS Styles */}
-      <style jsx global>{`
-        .cartela-cell {
-          aspect-ratio: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 10px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          font-size: 0.9rem;
-          border: 2px solid #e5e7eb;
-          background: white;
-          position: relative;
-        }
-        
-        .cartela-cell:not(.unavailable):hover {
-          transform: translateY(-3px);
-          box-shadow: 0 6px 12px rgba(79, 70, 229, 0.25);
-          border-color: #6366f1;
-          z-index: 10;
-        }
-        
-        .cartela-cell.selected {
-          background: linear-gradient(135deg, #10b981, #059669);
-          color: white;
-          border-color: #059669;
-          box-shadow: 0 6px 15px rgba(16, 185, 129, 0.4);
-          transform: scale(1.05);
-        }
-        
-        .cartela-cell.unavailable {
-          background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
-          color: #9ca3af;
-          cursor: not-allowed;
-          opacity: 0.7;
-        }
-        
-        .unavailable-badge {
-          position: absolute;
-          bottom: 4px;
-          right: 4px;
-          font-size: 0.6rem;
-          background-color: #ef4444;
-          color: white;
-          padding: 2px 6px;
-          border-radius: 10px;
-          font-weight: bold;
-        }
-        
-        .selected-badge {
-          position: absolute;
-          top: 4px;
-          right: 4px;
-          font-size: 0.7rem;
-          background-color: white;
-          color: #059669;
-          width: 16px;
-          height: 16px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: bold;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .bingo-5x5-cell {
-          aspect-ratio: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: white;
-          border-radius: 8px;
-          font-weight: bold;
-          font-size: 1rem;
-          border: 2px solid #e5e7eb;
-          transition: all 0.2s ease;
-          position: relative;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-        
-        .bingo-5x5-cell:hover {
-          transform: scale(1.05);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        
-        .bingo-5x5-cell.free-space {
-          background: linear-gradient(135deg, #fbbf24, #f59e0b);
-          color: white;
-          border-color: #f59e0b;
-          font-weight: bold;
-          font-size: 0.9rem;
-          box-shadow: 0 4px 8px rgba(245, 158, 11, 0.3);
-        }
-        
-        @media (max-width: 768px) {
-          .cartela-cell {
-            font-size: 0.8rem;
-          }
-          
-          .bingo-5x5-cell {
-            font-size: 0.8rem;
-          }
-        }
-      `}</style>
     </div>
   );
 };

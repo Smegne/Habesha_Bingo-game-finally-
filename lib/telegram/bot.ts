@@ -13,16 +13,16 @@ export const bot = new Telegraf(BOT_TOKEN)
 
 // Set bot commands
 const commands = [
-  { command: 'start', description: 'Start the bot' },
-  { command: 'register', description: 'Register user via Telegram' },
-  { command: 'play', description: 'Open Telegram Mini App' },
-  { command: 'deposit', description: 'Send money & upload screenshot' },
-  { command: 'balance', description: 'View wallet balance' },
-  { command: 'withdraw', description: 'Request withdrawal' },
-  { command: 'invite', description: 'Get referral link' },
-  { command: 'instructions', description: 'How to play guide' },
-  { command: 'support', description: 'Contact support' },
-  { command: 'about', description: 'About Habesha Bingo' },
+  { command: 'start', description: 'Start' },
+  { command: 'register', description: 'Register' },
+  { command: 'play', description: 'play' },
+  { command: 'deposit', description: 'deposit' },
+  { command: 'balance', description: 'balance' },
+  { command: 'withdraw', description: 'withdrawal' },
+  { command: 'invite', description: 'referral' },
+  { command: 'instructions', description: 'instructions' },
+  { command: 'support', description: 'support' },
+  { command: 'about', description: 'About' },
 ]
 
 // Initialize commands
