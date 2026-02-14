@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
         const result = await db.transaction(async (tx) => {
           console.log('POST /api/game/cartelas - Starting transaction');
           
-          // 1. Check cartela availability
+          // 1. Check cartela availability - FIXED: Use 'id' instead of 'cartela_id'
           const cartelaCheck = await tx.query(
             'SELECT id, cartela_number FROM cartela_card WHERE id = ? AND is_available = TRUE',
             [cartelaId]
@@ -150,15 +150,15 @@ export async function POST(request: NextRequest) {
           const bingoCardId = insertResult.insertId;
           console.log('POST /api/game/cartelas - Bingo card saved, ID:', bingoCardId);
 
-          // 5. Create game session
+          // 5. Create game session (optional - might be done in sessions route)
           await tx.execute(
             `INSERT INTO game_sessions 
-             (cartela_id, user_id, bingo_card_id, status, created_at) 
-             VALUES (?, ?, ?, 'active', NOW())`,
-            [cartelaId, userId, bingoCardId]
+             (session_code, status, created_at) 
+             VALUES (?, 'waiting', NOW())`,
+            [`BINGO-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`]
           );
 
-          console.log('POST /api/game/cartelas - Game session created');
+          console.log('POST /api/game/cartelas - Game session placeholder created');
 
           // Prepare response data
           return {

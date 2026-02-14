@@ -49,6 +49,7 @@ const isSpeechSynthesisSupported = (): boolean => {
 const useSafeSpeechSynthesis = () => {
   const [isSupported, setIsSupported] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  
   const [synth, setSynth] = useState<SpeechSynthesis | null>(null);
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -65,6 +66,8 @@ const useSafeSpeechSynthesis = () => {
     document.removeEventListener('touchstart', handleUserInteraction);
     document.removeEventListener('keydown', handleUserInteraction);
   };
+
+  
   
   useEffect(() => {
     // Mobile browsers require user interaction before playing audio
@@ -234,6 +237,13 @@ interface WinDetails {
   message?: string;
 }
 
+interface MultiplayerSession {
+  code: string;
+  userId: string;
+  sessionId: number;
+  hostId?: string;
+}
+
 export default function BingoGame() {
   const [called, setCalled] = useState<number[]>([])
   const [autoTimer, setAutoTimer] = useState<NodeJS.Timeout | null>(null)
@@ -250,6 +260,14 @@ export default function BingoGame() {
   const [error, setError] = useState<string | null>(null)
   const [winDetails, setWinDetails] = useState<WinDetails | null>(null)
   const [leaderboardData, setLeaderboardData] = useState<any[]>([])
+  
+  // Multiplayer state
+  const [multiplayerSession, setMultiplayerSession] = useState<MultiplayerSession | null>(null)
+  const [isHost, setIsHost] = useState(false)
+  const [syncedCalled, setSyncedCalled] = useState<number[]>([])
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null)
+  const [players, setPlayers] = useState<any[]>([])
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'syncing'>('connected')
   
   // Use safe speech synthesis hook
   const { 
@@ -269,6 +287,7 @@ export default function BingoGame() {
   const classicGridRef = useRef<HTMLDivElement>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const clickSoundRef = useRef<HTMLAudioElement | null>(null)
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
   // Environment detection
   const [environment, setEnvironment] = useState<string>('unknown')
@@ -277,6 +296,25 @@ export default function BingoGame() {
   // Fetch current game on component mount
   useEffect(() => {
     fetchCurrentGame()
+    
+    // Get multiplayer session info
+    const storedSession = localStorage.getItem('multiplayerSession');
+    if (storedSession) {
+      try {
+        const session = JSON.parse(storedSession);
+        setMultiplayerSession(session);
+        
+        // Check if this player is the host (you might need to determine this from your game state)
+        // For now, assume first player is host - you'll need to set this when creating the session
+        const isUserHost = localStorage.getItem('isHost') === 'true';
+        setIsHost(isUserHost);
+        
+        console.log('Multiplayer session loaded:', session);
+        console.log('Is host:', isUserHost);
+      } catch (e) {
+        console.error('Failed to parse multiplayer session:', e);
+      }
+    }
     
     // Initialize fallback audio for mobile
     if (typeof window !== 'undefined' && detectEnvironment() === 'mobile') {
@@ -344,8 +382,47 @@ export default function BingoGame() {
     }
   }, [showMobileSoundPrompt, userInteractedRef.current]);
 
-  // Handle auto toggle
+  // Start syncing called numbers with server for multiplayer
   useEffect(() => {
+    if (!multiplayerSession?.code || !multiplayerSession?.sessionId) {
+      // Not in multiplayer mode
+      return;
+    }
+
+    console.log('Starting multiplayer sync for session:', multiplayerSession.code);
+    setConnectionStatus('connected');
+
+    // Initial sync
+    syncCalledNumbers();
+
+    // Set up polling every 2 seconds
+    syncIntervalRef.current = setInterval(syncCalledNumbers, 2000);
+
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+    };
+  }, [multiplayerSession]);
+
+  // Disable auto mode in multiplayer - numbers come from host
+  useEffect(() => {
+    if (multiplayerSession) {
+      console.log('Multiplayer mode detected - disabling auto call');
+      setAutoToggle(false);
+      if (autoTimer) {
+        clearInterval(autoTimer);
+        setAutoTimer(null);
+      }
+    }
+  }, [multiplayerSession]);
+
+  // Handle auto toggle for single player
+  useEffect(() => {
+    // Don't run auto in multiplayer mode
+    if (multiplayerSession) return;
+    
     if (autoToggle && !isWinner) {
       const timer = setInterval(() => {
         if (called.length >= 75 || isCallingRef.current || isWinner) {
@@ -373,7 +450,7 @@ export default function BingoGame() {
         setAutoTimer(null)
       }
     }
-  }, [autoToggle, called, isWinner])
+  }, [autoToggle, called, isWinner, multiplayerSession])
 
   // Fetch current game from API
   const fetchCurrentGame = async () => {
@@ -445,6 +522,75 @@ export default function BingoGame() {
     
     return matrix
   }
+
+  // Sync called numbers from server
+  const syncCalledNumbers = async () => {
+    if (!multiplayerSession?.code) return;
+
+    try {
+      setConnectionStatus('syncing');
+      
+      const response = await fetch(`/api/game/sessions?code=${multiplayerSession.code}`);
+      const data = await response.json();
+
+      if (data.success && data.session) {
+        const serverCalled = data.session.calledNumbers || [];
+        setPlayers(data.players || []);
+        
+        // Update local state if server has different numbers
+        if (JSON.stringify(serverCalled) !== JSON.stringify(syncedCalled)) {
+          console.log('Syncing called numbers from server:', serverCalled);
+          setSyncedCalled(serverCalled);
+          
+          // Update the called state
+          setCalled(serverCalled);
+          
+          // Update recent calls
+          if (serverCalled.length > 0) {
+            const newRecent = [...recentCalls];
+            const lastNum = serverCalled[serverCalled.length - 1];
+            const letter = getLetter(lastNum);
+            newRecent.unshift(`${letter}-${lastNum}`);
+            newRecent.pop();
+            setRecentCalls(newRecent);
+          } else {
+            setRecentCalls(["—", "—", "—"]);
+          }
+          
+          // Update card matches
+          updateCardMatches(serverCalled);
+          
+          setLastSyncTime(new Date());
+        }
+        
+        setConnectionStatus('connected');
+      }
+    } catch (error) {
+      console.error('Failed to sync called numbers:', error);
+      setConnectionStatus('disconnected');
+    }
+  };
+
+  // Update card matches based on called numbers
+  const updateCardMatches = (calledNumbers: number[]) => {
+    const newCardMatrix = [...cardMatrix];
+    
+    newCardMatrix.forEach((row, rowIndex) => {
+      row.forEach((cell, colIndex) => {
+        if (cell.num && calledNumbers.includes(cell.num)) {
+          newCardMatrix[rowIndex][colIndex] = {
+            ...cell,
+            isMatch: true
+          };
+        }
+      });
+    });
+    
+    setCardMatrix(newCardMatrix);
+    
+    // Check for win with updated matches
+    checkWin(newCardMatrix);
+  };
 
   // Speech functions
   const getNumberWord = (num: number): string => {
@@ -602,53 +748,138 @@ export default function BingoGame() {
     return "O"
   }
 
-  // Call number function
-  const callNumber = (num: number) => {
-    if (called.includes(num) || isCallingRef.current || isWinner) return
-    
-    isCallingRef.current = true
-    
-    const newCalled = [...called, num]
-    setCalled(newCalled)
-    
-    const letter = getLetter(num)
-    const displayText = `${letter}-${num}`
-    
-    // Update recent calls
-    const newRecent = [...recentCalls]
-    newRecent.unshift(displayText)
-    newRecent.pop()
-    setRecentCalls(newRecent)
-    
-    // Update card matrix
-    const newCardMatrix = [...cardMatrix]
-    let cellUpdated = false
-    
-    newCardMatrix.forEach((row, rowIndex) => {
-      row.forEach((cell, colIndex) => {
-        if (cell.num === num) {
-          newCardMatrix[rowIndex][colIndex] = {
-            ...cell,
-            isMatch: true
-          }
-          cellUpdated = true
+  // Call number to server (for multiplayer host)
+  const callNumberToServer = async (num: number): Promise<boolean> => {
+    if (!multiplayerSession?.sessionId || !gameState?.user?.id) return false;
+
+    try {
+      const response = await fetch('/api/game/call-number', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: multiplayerSession.sessionId,
+          number: num,
+          userId: gameState.user.id
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        if (data.alreadyCalled) {
+          console.log('Number already called by another player');
+          return false;
         }
-      })
-    })
-    
-    setCardMatrix(newCardMatrix)
-    
-    // Speak the number
-    speakBingoNumber(num, () => {
-      isCallingRef.current = false
-      
-      // Check for win with the updated matrix
-      if (cellUpdated) {
-        setTimeout(() => {
-          checkWin(newCardMatrix)
-        }, 100)
+        return true;
       }
-    })
+      return false;
+    } catch (error) {
+      console.error('Failed to call number to server:', error);
+      return false;
+    }
+  };
+
+  // Main call number function (works for both single and multiplayer)
+  const callNumber = async (num: number) => {
+    // In multiplayer, only host can call numbers
+    if (multiplayerSession && !isHost) {
+      console.log('Only the host can call numbers in multiplayer mode');
+      return;
+    }
+
+    if (called.includes(num) || isCallingRef.current || isWinner) return;
+
+    // For multiplayer, send to server first
+    if (multiplayerSession) {
+      isCallingRef.current = true;
+      
+      const success = await callNumberToServer(num);
+      
+      if (success) {
+        // Server will broadcast to all players via polling
+        console.log('Number called successfully:', num);
+        
+        // Immediately update local state for responsiveness
+        const newCalled = [...called, num];
+        setCalled(newCalled);
+        
+        const letter = getLetter(num);
+        const displayText = `${letter}-${num}`;
+        
+        const newRecent = [...recentCalls];
+        newRecent.unshift(displayText);
+        newRecent.pop();
+        setRecentCalls(newRecent);
+        
+        // Update card matrix
+        const newCardMatrix = [...cardMatrix];
+        newCardMatrix.forEach((row, rowIndex) => {
+          row.forEach((cell, colIndex) => {
+            if (cell.num === num) {
+              newCardMatrix[rowIndex][colIndex] = {
+                ...cell,
+                isMatch: true
+              };
+            }
+          });
+        });
+        
+        setCardMatrix(newCardMatrix);
+        
+        // Speak the number
+        speakBingoNumber(num, () => {
+          isCallingRef.current = false;
+          
+          // Check for win
+          setTimeout(() => {
+            checkWin(newCardMatrix);
+          }, 100);
+        });
+      } else {
+        isCallingRef.current = false;
+      }
+    } else {
+      // Single player mode
+      isCallingRef.current = true;
+      
+      const newCalled = [...called, num];
+      setCalled(newCalled);
+      
+      const letter = getLetter(num);
+      const displayText = `${letter}-${num}`;
+      
+      const newRecent = [...recentCalls];
+      newRecent.unshift(displayText);
+      newRecent.pop();
+      setRecentCalls(newRecent);
+      
+      const newCardMatrix = [...cardMatrix];
+      let cellUpdated = false;
+      
+      newCardMatrix.forEach((row, rowIndex) => {
+        row.forEach((cell, colIndex) => {
+          if (cell.num === num) {
+            newCardMatrix[rowIndex][colIndex] = {
+              ...cell,
+              isMatch: true
+            };
+            cellUpdated = true;
+          }
+        });
+      });
+      
+      setCardMatrix(newCardMatrix);
+      
+      speakBingoNumber(num, () => {
+        isCallingRef.current = false;
+        
+        if (cellUpdated) {
+          setTimeout(() => {
+            checkWin(newCardMatrix);
+          }, 100);
+        }
+      });
+    }
   }
 
   // Helper function to determine win type
@@ -678,7 +909,7 @@ export default function BingoGame() {
       if (!gameState) return false
       
       const winData = {
-        gameSessionId: gameState.bingoCard.id,
+        gameSessionId: multiplayerSession?.sessionId || gameState.bingoCard.id,
         bingoCardId: gameState.bingoCard.id,
         winType,
         winPattern,
@@ -826,6 +1057,81 @@ export default function BingoGame() {
       isSpeakingRef.current = false
     }
   }
+  // Add this function to your BingoGame component
+const handleLeaveGame = async () => {
+  // Confirm with user
+  if (!confirm('Are you sure you want to leave the game?')) {
+    return;
+  }
+
+  try {
+    // If in multiplayer session, notify server
+    if (multiplayerSession?.sessionId && gameState?.user?.id) {
+      setConnectionStatus('disconnected');
+      
+      // Call API to remove player from session
+      const response = await fetch('/api/game/leave', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        },
+        body: JSON.stringify({
+          sessionId: multiplayerSession.sessionId,
+          userId: gameState.user.id
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('Successfully left multiplayer session');
+        
+        // Show message if user was the host
+        if (isHost) {
+          alert('You were the host. The game will end for other players.');
+        }
+      } else {
+        console.error('Failed to leave session:', data.message);
+      }
+    }
+
+    // Clear multiplayer session from localStorage
+    localStorage.removeItem('multiplayerSession');
+    localStorage.removeItem('currentSession');
+    localStorage.removeItem('currentBingoCardId');
+    localStorage.removeItem('cartelaNumber');
+    localStorage.removeItem('cardNumber');
+    localStorage.removeItem('isHost');
+    localStorage.removeItem('bingoGameData');
+
+    // Stop all intervals
+    if (syncIntervalRef.current) {
+      clearInterval(syncIntervalRef.current);
+      syncIntervalRef.current = null;
+    }
+    
+    if (autoTimer) {
+      clearInterval(autoTimer);
+      setAutoTimer(null);
+    }
+
+    // Cancel any speaking
+    if (synthRef.current) {
+      synthRef.current.cancel();
+    }
+
+    // Redirect to game selection or lobby
+    window.location.href = '/'; // or wherever your main game lobby is
+    
+  } catch (error) {
+    console.error('Error leaving game:', error);
+    alert('Failed to leave game properly. Please try again.');
+    
+    // Force redirect even if API fails
+    window.location.href = '/';
+  }
+};
 
   // Handle mute toggle
   const handleMuteToggle = () => {
@@ -870,7 +1176,7 @@ export default function BingoGame() {
     setIsWinner(false)
     setWinDetails(null)
     setRecentCalls(["—", "—", "—"])
-    setAutoToggle(true)
+    setAutoToggle(!multiplayerSession) // Only enable auto if not multiplayer
     
     // Reset card matrix to initial state
     if (gameState) {
@@ -889,6 +1195,17 @@ export default function BingoGame() {
     const v = n % 100
     return suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]
   }
+
+  // Handle classic grid click
+  const handleClassicGridClick = (num: number) => {
+    if (multiplayerSession && !isHost) {
+      // In multiplayer, non-host players cannot call numbers
+      console.log('Only the host can call numbers');
+      return;
+    }
+    
+    callNumber(num);
+  };
 
   // Render bingo header
   const BingoHeader = () => (
@@ -1269,6 +1586,65 @@ export default function BingoGame() {
           <EnvironmentBadge />
         </div>
         
+        {/* Multiplayer Status Bar */}
+        {multiplayerSession && (
+          <div style={{
+            position: 'absolute',
+            top: '10px',
+            left: '10px',
+            zIndex: 20,
+            display: 'flex',
+            gap: '10px',
+            alignItems: 'center'
+          }}>
+            <div style={{
+              background: isHost ? 'rgba(34, 197, 94, 0.2)' : 'rgba(156, 163, 175, 0.2)',
+              padding: '4px 12px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              color: isHost ? '#22c55e' : '#9ca3af',
+              border: `1px solid ${isHost ? '#22c55e' : '#9ca3af'}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px'
+            }}>
+              <span>{isHost ? '👑 Host' : '🎮 Player'}</span>
+            </div>
+            
+            <div style={{
+              background: connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.2)' : 
+                          connectionStatus === 'syncing' ? 'rgba(234, 179, 8, 0.2)' : 
+                          'rgba(239, 68, 68, 0.2)',
+              padding: '4px 12px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              color: connectionStatus === 'connected' ? '#22c55e' : 
+                     connectionStatus === 'syncing' ? '#eab308' : 
+                     '#ef4444',
+              border: `1px solid ${connectionStatus === 'connected' ? '#22c55e' : 
+                                   connectionStatus === 'syncing' ? '#eab308' : 
+                                   '#ef4444'}`,
+            }}>
+              {connectionStatus === 'connected' ? '● Connected' : 
+               connectionStatus === 'syncing' ? '⟳ Syncing' : 
+               '○ Disconnected'}
+            </div>
+
+            {players.length > 0 && (
+              <div style={{
+                background: 'rgba(255,255,255,0.1)',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                color: '#fff',
+                border: '1px solid rgba(255,255,255,0.2)',
+              }}>
+                👥 {players.length} Player{players.length !== 1 ? 's' : ''}
+              </div>
+            )}
+          </div>
+        )}
+        
         {/* TOP STATS BAR */}
         <div className="stats-bar">
           <div className="stat-item">
@@ -1313,7 +1689,13 @@ export default function BingoGame() {
                   <div
                     key={num}
                     className={`classic-grid-item ${called.includes(num) ? 'called' : ''}`}
-                    onClick={() => callNumber(num)}
+                    onClick={() => handleClassicGridClick(num)}
+                    title={multiplayerSession && !isHost && !called.includes(num) 
+                      ? 'Only the host can call numbers' 
+                      : `Call number ${num}`}
+                    style={multiplayerSession && !isHost && !called.includes(num) 
+                      ? { opacity: 0.5, cursor: 'not-allowed' } 
+                      : {}}
                   >
                     {num}
                   </div>
@@ -1416,23 +1798,51 @@ export default function BingoGame() {
               </div>
 
               {/* CONTROLS */}
-              <div className="controls">
-                <button
-                  className={`control-button ${autoToggle ? 'auto-button active' : 'auto-button'}`}
-                  onClick={() => setAutoToggle(!autoToggle)}
-                  disabled={isWinner}
-                  title={autoToggle ? 'Stop automatic number calling' : 'Start automatic number calling'}
-                >
-                  {autoToggle ? '⏹️Auto' : '▶️Auto'}
-                </button>
-                <button
-                  className="control-button reset-button"
-                  onClick={resetGame}
-                  title="Reset the game"
-                >
-                  🔄 Reset
-                </button>
-              </div>
+            {/* CONTROLS */}
+<div className="controls" style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+  {!multiplayerSession && (
+    <button
+      className={`control-button ${autoToggle ? 'auto-button active' : 'auto-button'}`}
+      onClick={() => setAutoToggle(!autoToggle)}
+      disabled={isWinner}
+      title={autoToggle ? 'Stop automatic number calling' : 'Start automatic number calling'}
+    >
+      {autoToggle ? '⏹️Auto' : '▶️Auto'}
+    </button>
+  )}
+  <button
+    className="control-button reset-button"
+    onClick={resetGame}
+    title="Reset the game"
+  >
+    🔄 Reset
+  </button>
+  
+  {/* Leave Game Button - Always visible */}
+  <button
+    className="control-button leave-button"
+    onClick={handleLeaveGame}
+    title={multiplayerSession ? 'Leave multiplayer game' : 'Exit to lobby'}
+    style={{
+      background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+      color: 'white',
+      border: 'none',
+      padding: '8px 16px',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      fontWeight: 'bold',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '5px',
+      transition: 'all 0.3s'
+    }}
+    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+  >
+    <span>🚪</span>
+    Leave Game
+  </button>
+</div>
 
               {/* BINGO CARD SECTION */}
               <div className="flex-column flex-1 min-height-0 overflow-hidden">
@@ -1445,8 +1855,8 @@ export default function BingoGame() {
                       <div
                         key={`${rowIndex}-${colIndex}`}
                         className={`bingo-cell ${cell.isMatch ? 'matched' : ''} ${cell.isWin ? 'winning' : ''}`}
-                        onClick={() => cell.num && callNumber(cell.num)}
-                        title={`Click to call ${cell.num}`}
+                        onClick={() => cell.num && handleClassicGridClick(cell.num)}
+                        title={cell.num ? `Click to call ${cell.num}` : 'Free space'}
                       >
                         {cell.text}
                       </div>
@@ -1458,8 +1868,6 @@ export default function BingoGame() {
           </div>
         </div>
       </div>
-
-    
     </div>
   )
 }

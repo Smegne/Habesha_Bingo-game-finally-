@@ -76,23 +76,32 @@ export const db = {
     return db.query(sql, params)
   },
 
-  transaction: async (callback: (connection: any) => Promise<any>) => {
-    const connection = await pool.getConnection()
-    try {
-      await connection.beginTransaction()
-      const result = await callback({
-        execute: (sql: string, params: any[]) => connection.execute(sql, params),
-        query: (sql: string, params: any[]) => connection.execute(sql, params),
-      })
-      await connection.commit()
-      return result
-    } catch (error) {
-      await connection.rollback()
-      throw error
-    } finally {
-      connection.release()
-    }
-  },
+ transaction: async (callback: (connection: any) => Promise<any>) => {
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+
+    const result = await callback({
+      execute: async (sql: string, params: any[]) => {
+        const [result] = await connection.execute(sql, params)
+        return result
+      },
+      query: async (sql: string, params: any[]) => {
+        const [rows] = await connection.execute(sql, params)
+        return rows
+      },
+    })
+
+    await connection.commit()
+    return result
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+,
 }
 
 export default pool

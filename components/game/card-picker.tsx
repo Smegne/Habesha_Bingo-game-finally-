@@ -1,4 +1,4 @@
-// components/game/card-picker.tsx - DEBUGGED VERSION
+// components/game/card-picker.tsx - UPDATED VERSION
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -9,10 +9,11 @@ import {
   StarFill, TrophyFill, Coin, Grid3x3GapFill,
   Search, Filter, SortNumericDown, SortNumericUpAlt,
   LightningChargeFill, AwardFill, GiftFill,
-  Dice5Fill, Stars
+  Dice5Fill, Stars, PeopleFill, ClockFill
 } from 'react-bootstrap-icons';
 import dynamic from 'next/dynamic';
 import { useGameStore } from '@/lib/game-store';
+import CountdownDisplay from './CountdownDisplay';
 
 // Dynamic import for BingoGame component
 const BingoGame = dynamic(() => import('./bingo-game'), {
@@ -55,6 +56,15 @@ interface User {
   isOnline?: boolean;
 }
 
+interface GameSession {
+  id: number;
+  code: string;
+  status: 'waiting' | 'countdown' | 'active' | 'finished' | 'cancelled';
+  countdownRemaining: number;
+  playerCount: number;
+  createdAt: string;
+}
+
 interface CardPickerProps {
   onGameStart?: (gameData: any) => void;
 }
@@ -64,25 +74,25 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   const { 
     user: storeUser, 
     isLoggedIn, 
-    login, 
     logout: storeLogout,
-    initializeTelegramAuth,
-    fetchAvailableCards: storeFetchCards,
-    selectCard: storeSelectCard
+    initializeTelegramAuth
   } = useGameStore();
   
+  // Cartela states
   const [cartelas, setCartelas] = useState<Cartela[]>([]);
   const [filteredCartelas, setFilteredCartelas] = useState<Cartela[]>([]);
   const [selectedCartela, setSelectedCartela] = useState<Cartela | null>(null);
   const [bingoCardNumbers, setBingoCardNumbers] = useState<(number | string)[]>([]);
   const [generatedCardData, setGeneratedCardData] = useState<any>(null);
+  
+  // UI states
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [sortBy, setSortBy] = useState<'number' | 'availability'>('number');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   
-  // User state - derived from store
+  // User state
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userLoading, setUserLoading] = useState(true);
   const [userVerification, setUserVerification] = useState<{
@@ -91,9 +101,11 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     timestamp: string;
   } | null>(null);
   
-  // Game modal state - SIMPLIFIED
+  // Game states
   const [showBingoGame, setShowBingoGame] = useState<boolean>(false);
   const [bingoGameData, setBingoGameData] = useState<any>(null);
+  const [gameSession, setGameSession] = useState<GameSession | null>(null);
+  const [showCountdown, setShowCountdown] = useState<boolean>(false);
   
   // UI states
   const [showQuickStats, setShowQuickStats] = useState<boolean>(true);
@@ -104,6 +116,8 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   const clickSoundRef = useRef<HTMLAudioElement | null>(null);
   const confirmSoundRef = useRef<HTMLAudioElement | null>(null);
   const selectSoundRef = useRef<HTMLAudioElement | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const winnerPollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize and fetch data
   useEffect(() => {
@@ -116,15 +130,28 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       if (audio) audio.load();
     });
 
+    // Check for existing session
+    const savedSession = localStorage.getItem('currentSession');
+    if (savedSession) {
+      const session = JSON.parse(savedSession);
+      setGameSession(session);
+      setShowCountdown(true);
+    }
+
     // Fetch initial data
     checkAuthAndLoadData();
     fetchCartelas();
+
+    // Cleanup on unmount
+    return () => {
+      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+      if (winnerPollingRef.current) clearInterval(winnerPollingRef.current);
+    };
   }, []);
 
   // Sync store user with component state
   useEffect(() => {
     if (storeUser && isLoggedIn) {
-      console.log('🔄 Store user updated:', storeUser.username);
       const user: User = {
         id: storeUser.id,
         telegramId: storeUser.telegramId,
@@ -149,7 +176,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       
       localStorage.setItem('currentUser', JSON.stringify(user));
     } else if (!isLoggedIn && currentUser) {
-      console.log('🔄 Store logged out, clearing local user');
       setCurrentUser(null);
       setUserVerification(null);
       localStorage.removeItem('currentUser');
@@ -187,8 +213,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   const checkAuthAndLoadData = async () => {
     setUserLoading(true);
     try {
-      console.log('🔐 Checking authentication...');
-      
       const token = localStorage.getItem('token');
       const storedUser = localStorage.getItem('currentUser');
       
@@ -204,8 +228,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
           const data = await response.json();
           
           if (data.success && data.user) {
-            console.log('✅ Token valid, user authenticated:', data.user.username);
-            
             const user: User = {
               id: data.user.id,
               telegramId: data.user.telegram_id,
@@ -227,17 +249,15 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
             });
             
             localStorage.setItem('currentUser', JSON.stringify(user));
-            
             setUserLoading(false);
             return;
           }
         } catch (error) {
-          console.log('❌ Token verification failed:', error);
+          console.log('Token verification failed:', error);
         }
       }
       
       if (storeUser && isLoggedIn) {
-        console.log('✅ Using store user:', storeUser.username);
         const user: User = {
           id: storeUser.id,
           telegramId: storeUser.telegramId,
@@ -259,18 +279,15 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         });
         
         localStorage.setItem('currentUser', JSON.stringify(user));
-        
         setUserLoading(false);
         return;
       }
       
-      console.log('🔄 Trying Telegram auth...');
       const telegramSuccess = await initializeTelegramAuth();
       
       if (telegramSuccess) {
-        console.log('✅ Telegram auth successful');
+        console.log('Telegram auth successful');
       } else {
-        console.log('❌ No authentication found');
         setCurrentUser(null);
         setUserVerification({
           verified: false,
@@ -280,7 +297,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       }
       
     } catch (error) {
-      console.error('❌ Auth check error:', error);
+      console.error('Auth check error:', error);
       setCurrentUser(null);
       setUserVerification({
         verified: false,
@@ -299,7 +316,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       
       if (data.success) {
         setCartelas(data.cartelas);
-        console.log(`🎰 Loaded ${data.cartelas.length} cartelas`);
       }
     } catch (error) {
       console.error('Error fetching cartelas:', error);
@@ -369,7 +385,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         const numbers = data.cardData.numbers.map((item: any) => item.number);
         setBingoCardNumbers(numbers);
         setGeneratedCardData(data.cardData);
-        console.log('✅ BINGO card preview generated for user:', currentUser.username);
       } else {
         alert(data.message || 'Failed to generate preview');
       }
@@ -381,102 +396,284 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     }
   };
 
-  // SIMPLIFIED: Direct function to start bingo game
-  const confirmAndStartGame = async () => {
-    if (!selectedCartela || !generatedCardData) {
-      alert('Please select a cartela first');
-      return;
+
+// In card-picker.tsx - Enhanced error handling
+const startMultiplayerGame = async () => {
+  if (!selectedCartela || !generatedCardData || !currentUser) {
+    alert('Please select a cartela and login first');
+    return;
+  }
+  
+  setIsLoading(true);
+  playSound('confirm');
+  
+  try {
+    console.log('Starting game with:', {
+      cartelaId: selectedCartela.id,
+      userId: currentUser.id,
+      cardData: generatedCardData
+    });
+    
+    const response = await fetch('/api/game/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cartelaId: selectedCartela.id,
+        userId: currentUser.id,
+        cardData: generatedCardData
+      })
+    });
+    
+    // Log raw response for debugging
+    console.log('Response status:', response.status);
+    
+    const data = await response.json();
+    console.log('Response data:', data);
+    
+    if (!response.ok) {
+      throw new Error(data.message || `HTTP error! status: ${response.status}`);
     }
     
-    if (!currentUser) {
-      alert('Please login to start a game');
-      checkAuthAndLoadData();
-      return;
+    if (!data.success) {
+      throw new Error(data.message || 'Failed to start game');
     }
     
-    console.log('🎮 Starting BINGO game with cartela:', selectedCartela.cartela_number);
-    console.log('🎯 User:', currentUser.username);
-    console.log('🎲 Generated card data:', generatedCardData);
+    // Validate response structure
+    if (!data.session) {
+      console.error('Invalid response structure:', data);
+      throw new Error('Invalid response from server: missing session data');
+    }
     
-    playSound('confirm');
-    setIsLoading(true);
+    // Save session info
+    localStorage.setItem('currentSession', JSON.stringify(data.session));
+    localStorage.setItem('currentBingoCardId', data.bingoCardId.toString());
+    if (data.cartelaNumber) {
+      localStorage.setItem('cartelaNumber', data.cartelaNumber);
+    }
+    if (data.cardNumber) {
+      localStorage.setItem('cardNumber', data.cardNumber.toString());
+    }
     
+    // Set session state and show countdown
+    setGameSession(data.session);
+    setShowCountdown(true);
+    
+    // Start polling for session updates
+    startSessionPolling(data.session.code, currentUser.id);
+    
+  } catch (error: any) {
+    console.error('Failed to start multiplayer game:', error);
+    
+    // Show more detailed error message
+    let errorMessage = error.message || 'Failed to start game';
+    
+    // Check for specific error types
+    if (error.message.includes('not iterable')) {
+      errorMessage = 'Server returned invalid data format. Please try again.';
+    }
+    
+    alert(errorMessage);
+    setIsLoading(false);
+  }
+};
+
+  // Polling function for session updates
+const startSessionPolling = (sessionCode: string, userId: string) => {
+  if (pollingIntervalRef.current) {
+    clearInterval(pollingIntervalRef.current);
+    pollingIntervalRef.current = null;
+  }
+  
+  let consecutiveErrors = 0;
+  const MAX_CONSECUTIVE_ERRORS = 3;
+  
+  pollingIntervalRef.current = setInterval(async () => {
     try {
-      const token = localStorage.getItem('token');
-      
-      const response = await fetch('/api/game/cartelas', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          cartelaId: selectedCartela.id,
-          userId: currentUser.id,
-          username: currentUser.username,
-          firstName: currentUser.firstName,
-          cardData: generatedCardData,
-          saveGame: true,
-          startGame: true
-        })
-      });
-      
+      // Use the sessions endpoint (not current)
+      const response = await fetch(`/api/game/sessions?code=${sessionCode}&userId=${userId}`);
       const data = await response.json();
-      console.log('🎮 Game start API response:', data);
       
       if (data.success) {
-        // Create simple game data
-        const gameData = {
-          gameId: data.gameId || `game_${Date.now()}`,
-          cartelaNumber: selectedCartela.cartela_number,
-          cardNumbers: bingoCardNumbers,
-          cardData: data.cardData || generatedCardData,
-          user: {
-            id: currentUser.id,
-            username: currentUser.username,
-            firstName: currentUser.firstName,
-            balance: currentUser.balance
-          },
-          startTime: new Date().toISOString(),
-          status: 'active',
-          drawnNumbers: [],
-          markedNumbers: []
-        };
+        consecutiveErrors = 0;
+        const session = data.session;
+        const players = data.players;
         
-        // Store game data
-        localStorage.setItem('bingoGameData', JSON.stringify(gameData));
+        // Update session state
+        setGameSession({
+          id: session.id,
+          code: session.code,
+          status: session.status,
+          countdownRemaining: session.countdownRemaining,
+          playerCount: session.playerCount,
+          createdAt: session.createdAt
+        });
         
-        // Set state to show bingo game - THIS IS THE KEY LINE
-        setBingoGameData(gameData);
-        
-        // Wait a tiny bit to ensure state is set
-        setTimeout(() => {
-          console.log('🔄 Setting showBingoGame to TRUE');
-          setShowBingoGame(true);
-          setIsLoading(false);
-        }, 100);
-        
-        // Refresh cartelas
-        fetchCartelas();
-        
-        // Notify parent
-        if (onGameStart) {
-          onGameStart(gameData);
+        // Check if we have 2+ players and session is waiting
+        if (session.playerCount >= 2 && session.status === 'waiting') {
+          console.log('✅ Two players detected, forcing countdown start');
+          setGameSession(prev => prev ? {
+            ...prev,
+            status: 'countdown',
+            countdownRemaining: 50
+          } : null);
         }
         
-        console.log('✅ BINGO game prepared, should open now');
+        // Handle session state changes
+        if (session.status === 'cancelled') {
+          stopPolling();
+          setShowCountdown(false);
+          setGameSession(null);
+          setIsLoading(false);
+          localStorage.removeItem('currentSession');
+          alert('No other players joined yet. Please try again.');
+        }
         
+        if (session.status === 'active' || session.shouldStartGame) {
+          console.log('🎮 Game is starting!');
+          stopPolling();
+          setShowCountdown(false);
+          startBingoGame(sessionCode, userId);
+        }
       } else {
-        alert(data.message || 'Failed to start game');
-        setIsLoading(false);
+        consecutiveErrors++;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          console.error('Too many polling errors, stopping...');
+          stopPolling();
+        }
       }
     } catch (error) {
-      console.error('❌ Error starting game:', error);
-      alert('Failed to start game. Please check console for details.');
+      console.error('Polling error:', error);
+      consecutiveErrors++;
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        stopPolling();
+      }
+    }
+  }, 1500);
+};
+  // Start bingo game with multiplayer data
+const startBingoGame = async (sessionCode: string, userId: string) => {
+  try {
+    // Fetch current session data
+    const response = await fetch(`/api/game/sessions?code=${sessionCode}&userId=${userId}`);
+    const data = await response.json();
+    
+    if (data.success && data.session) {
+      // Get stored data
+      const bingoCardId = localStorage.getItem('currentBingoCardId');
+      const cartelaNumber = localStorage.getItem('cartelaNumber');
+      
+      const gameData = {
+        sessionId: data.session.id,
+        sessionCode: sessionCode,
+        isMultiplayer: true,
+        gameMode: 'multiplayer',
+        startTime: new Date().toISOString(),
+        playerCount: data.session.playerCount,
+        players: data.players || [],
+        bingoCardId: bingoCardId,
+        cartelaNumber: cartelaNumber,
+        // Include the card data that was generated earlier
+        cardData: generatedCardData
+      };
+      
+      localStorage.setItem('bingoGameData', JSON.stringify(gameData));
+      localStorage.setItem('multiplayerSession', JSON.stringify({
+        code: sessionCode,
+        userId: userId,
+        sessionId: data.session.id
+      }));
+      
+      setBingoGameData(gameData);
+      setShowBingoGame(true);
       setIsLoading(false);
+      
+      // Start winner detection polling
+      startWinnerPolling(sessionCode, userId);
+    } else {
+      console.error('Failed to get session data:', data);
+      setIsLoading(false);
+    }
+  } catch (error) {
+    console.error('Failed to start bingo game:', error);
+    setIsLoading(false);
+  }
+};
+
+  // Poll for winner announcements
+  const startWinnerPolling = (sessionCode: string, userId: string) => {
+    if (winnerPollingRef.current) {
+      clearInterval(winnerPollingRef.current);
+    }
+    
+    winnerPollingRef.current = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/game/sessions?code=${sessionCode}`);
+        const data = await response.json();
+        
+        if (data.success && data.session.status === 'finished') {
+          stopWinnerPolling();
+          
+          // Show winner announcement
+          if (data.session.winner_user_id === userId) {
+            alert('🎉 Congratulations! You won the game!');
+          } else {
+            // Get winner info from players list
+            const winner = data.players.find((p: any) => p.user_id === data.session.winner_user_id);
+            alert(`🏆 ${winner?.first_name || winner?.username || 'Another player'} won the game!`);
+          }
+          
+          // Clean up
+          localStorage.removeItem('currentSession');
+          localStorage.removeItem('multiplayerSession');
+          setGameSession(null);
+        }
+      } catch (error) {
+        console.error('Winner polling error:', error);
+      }
+    }, 3000); // Poll every 3 seconds
+  };
+
+  const stopPolling = () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
     }
   };
 
+  const stopWinnerPolling = () => {
+    if (winnerPollingRef.current) {
+      clearInterval(winnerPollingRef.current);
+      winnerPollingRef.current = null;
+    }
+  };
+
+  // Handle countdown cancellation
+  const handleCountdownCancel = (reason: string) => {
+    setShowCountdown(false);
+    setGameSession(null);
+    setIsLoading(false);
+    localStorage.removeItem('currentSession');
+    stopPolling();
+    
+    if (reason !== 'User cancelled') {
+      alert(reason);
+    }
+  };
+
+// In card-picker.tsx - Enhanced handleCountdownStart
+const handleCountdownStart = () => {
+  if (gameSession?.code && currentUser?.id) {
+    // Get stored session data if available
+    const storedSessionData = localStorage.getItem('currentSessionData');
+    if (storedSessionData) {
+      const sessionData = JSON.parse(storedSessionData);
+      console.log('Starting game with session data:', sessionData);
+      localStorage.removeItem('currentSessionData'); // Clean up
+    }
+    
+    startBingoGame(gameSession.code, currentUser.id);
+  }
+};
   // Handle bingo game close
   const handleBingoGameClose = () => {
     console.log('🎮 Closing BINGO game');
@@ -487,6 +684,15 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     setSelectedCartela(null);
     setBingoCardNumbers([]);
     setGeneratedCardData(null);
+    
+    // Clean up session
+    setGameSession(null);
+    localStorage.removeItem('currentSession');
+    localStorage.removeItem('multiplayerSession');
+    
+    // Stop all polling
+    stopPolling();
+    stopWinnerPolling();
     
     // Refresh cartelas
     fetchCartelas();
@@ -500,6 +706,8 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       localStorage.removeItem('token');
       localStorage.removeItem('auth_token');
       localStorage.removeItem('bingoGameData');
+      localStorage.removeItem('currentSession');
+      localStorage.removeItem('multiplayerSession');
       
       storeLogout();
       
@@ -510,6 +718,12 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       setGeneratedCardData(null);
       setShowBingoGame(false);
       setBingoGameData(null);
+      setGameSession(null);
+      setShowCountdown(false);
+      
+      // Stop polling
+      stopPolling();
+      stopWinnerPolling();
       
       alert('Logged out successfully.');
     }
@@ -547,9 +761,13 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
 
   // Debug: Log when showBingoGame changes
   useEffect(() => {
-    console.log('🎮 showBingoGame state changed:', showBingoGame);
-    console.log('🎮 bingoGameData:', bingoGameData);
-  }, [showBingoGame, bingoGameData]);
+    console.log('🎮 Game states:', {
+      showBingoGame,
+      showCountdown,
+      gameSession,
+      hasBingoGameData: !!bingoGameData
+    });
+  }, [showBingoGame, showCountdown, gameSession, bingoGameData]);
 
   if (userLoading) {
     return (
@@ -577,12 +795,25 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900 p-3 md:p-6 relative overflow-hidden">
-      {/* BINGO Game Component - RENDERED CONDITIONALLY */}
+      {/* Countdown Display */}
+      {showCountdown && gameSession && currentUser && (
+        <CountdownDisplay
+          sessionCode={gameSession.code}
+          userId={currentUser.id}
+          onGameStart={handleCountdownStart}
+          onCancel={handleCountdownCancel}
+        />
+      )}
+
+      {/* BINGO Game Component */}
       {showBingoGame && bingoGameData && (
         <div className="fixed inset-0 z-50">
           <BingoGame 
             initialData={bingoGameData}
             onClose={handleBingoGameClose}
+            isMultiplayer={true}
+            sessionId={gameSession?.id}
+            userId={currentUser?.id}
           />
         </div>
       )}
@@ -608,7 +839,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
           <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full blur opacity-0 group-hover:opacity-70 transition-opacity"></div>
           <button
             onClick={refreshAll}
-            disabled={isLoading || showBingoGame}
+            disabled={isLoading || showBingoGame || showCountdown}
             className="relative w-14 h-14 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-full flex items-center justify-center hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm disabled:opacity-50"
             title="Refresh all data"
           >
@@ -618,7 +849,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       </div>
 
       {/* Top Action Buttons */}
-      {currentUser && !showBingoGame && (
+      {currentUser && !showBingoGame && !showCountdown && (
         <div className="fixed top-4 left-4 z-30 flex gap-2">
           <button
             onClick={handleLogout}
@@ -641,8 +872,8 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       )}
 
       <div className="max-w-7xl mx-auto relative z-10">
-        {/* Only show card picker content when bingo game is NOT showing */}
-        {!showBingoGame ? (
+        {/* Only show card picker content when bingo game or countdown is NOT showing */}
+        {!showBingoGame && !showCountdown ? (
           <>
             {/* Header */}
             <div className="relative overflow-hidden rounded-3xl mb-6 md:mb-8">
@@ -666,7 +897,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
                       Select your lucky cartela and start winning!
                     </p>
                     <p className="text-sm opacity-70">
-                      Premium gaming experience with enhanced rewards
+                      Premium multiplayer gaming experience
                     </p>
                   </div>
                   
@@ -721,7 +952,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
                       <div className="text-center">
                         <ShieldCheck size={48} className="text-red-300 mx-auto mb-2" />
                         <p className="font-bold text-xl mb-2">Authentication Required</p>
-                        <p className="opacity-90">Login to access premium features</p>
+                        <p className="opacity-90">Login to access multiplayer games</p>
                       </div>
                       <div className="flex gap-3">
                         <button
@@ -989,20 +1220,20 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
                           <XCircle size={16} /> Clear
                         </button>
                         <button
-                          onClick={confirmAndStartGame}
+                          onClick={startMultiplayerGame}
                           disabled={isLoading}
                           className="px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold rounded-xl hover:shadow-2xl hover:scale-105 transition-all disabled:opacity-50 backdrop-blur-sm flex items-center gap-2"
                         >
                           {isLoading ? (
                             <>
                               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                              Starting Game...
+                              Joining Game...
                             </>
                           ) : (
                             <>
                               <PlayCircle size={20} /> 
-                              <span className="hidden md:inline">Start BINGO Game</span>
-                              <span className="md:hidden">Play BINGO</span>
+                              <span className="hidden md:inline">Start Multiplayer Game</span>
+                              <span className="md:hidden">Play Now</span>
                             </>
                           )}
                         </button>
@@ -1098,7 +1329,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
                           <div className="mt-6">
                             <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-full">
                               <StarFill size={16} className="text-yellow-400" />
-                              <span className="text-sm">Premium Experience</span>
+                              <span className="text-sm">Multiplayer Ready</span>
                             </div>
                           </div>
                         </div>
@@ -1114,44 +1345,21 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
                       <LightningChargeFill size={20} className="text-white" />
                     </div>
                     <div>
-                      <p className="font-bold text-white mb-1">How to Play BINGO</p>
+                      <p className="font-bold text-white mb-1">Multiplayer BINGO Rules</p>
                       <p className="text-sm text-white/70">
                         1. Select a cartela number from the grid<br />
                         2. Preview your BINGO card with lucky numbers<br />
-                        3. Click "Start BINGO Game" to begin playing<br />
-                        4. Numbers will be drawn automatically<br />
-                        5. Mark matching numbers on your card<br />
-                        6. Complete a line (row, column, diagonal) to WIN!
+                        3. Click "Start Multiplayer Game" to join waiting room<br />
+                        4. Wait for other players (50s countdown)<br />
+                        5. Game starts automatically with 2+ players<br />
+                        6. First to complete a BINGO pattern wins!<br />
+                        7. If no one joins, you'll get a message
                       </p>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-            
-            {/* Resume Game Button */}
-            {currentUser && localStorage.getItem('bingoGameData') && (
-              <div className="mt-6 text-center">
-                <button
-                  onClick={() => {
-                    try {
-                      const savedGame = JSON.parse(localStorage.getItem('bingoGameData') || '{}');
-                      console.log('🎮 Resuming saved game:', savedGame.gameId);
-                      setBingoGameData(savedGame);
-                      setShowBingoGame(true);
-                      playSound('confirm');
-                    } catch (error) {
-                      console.error('Error loading saved game:', error);
-                      alert('Could not load saved game');
-                    }
-                  }}
-                  className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-bold hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2 mx-auto"
-                >
-                  <PlayCircle size={20} />
-                  Resume Previous BINGO Game
-                </button>
-              </div>
-            )}
             
             {/* Footer Security Info */}
             {currentUser && (
