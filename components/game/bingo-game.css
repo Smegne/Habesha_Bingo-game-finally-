@@ -621,3 +621,48 @@
 
 
 
+/* Disable clicking on game elements */
+.classic-grid-item,
+.bingo-cell {
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none; /* This completely disables clicking */
+}
+
+/* Keep the visual feedback but remove interactivity */
+.classic-grid-item.called {
+  background-color: #4ade80 !important;
+  color: #000 !important;
+}
+
+/* System calling animation */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.system-calling-badge {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 30px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border: 1px solid #22c55e;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.system-calling-badge .dot {
+  width: 12px;
+  height: 12px;
+  background-color: #22c55e;
+  border-radius: 50%;
+  animation: pulse 1.5s infinite;
+}

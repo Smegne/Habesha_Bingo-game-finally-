@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test-cron": "node test-cron.js",
     "bot": "node scripts/simple-bot.js",
     "bot:commands": "node scripts/set-commands.js",
     "bot:simple": "node scripts/simple-bot.js",

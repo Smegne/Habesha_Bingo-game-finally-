@@ -1,187 +1,13 @@
 // components/game/bingo-game.tsx
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import "./bingo-game.css"
 
-// Interface for speech synthesis window
+// Interfaces
 interface SpeechSynthesisWindow extends Window {
   speechSynthesis?: SpeechSynthesis;
 }
-
-// Helper function to detect environment
-const detectEnvironment = (): string => {
-  if (typeof window === 'undefined') return 'server';
-  
-  const userAgent = navigator.userAgent.toLowerCase();
-  
-  if (userAgent.includes('telegram')) {
-    return 'telegram';
-  } else if (/android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent)) {
-    return 'mobile';
-  } else {
-    return 'desktop';
-  }
-};
-
-// Helper function to check speech synthesis support
-const isSpeechSynthesisSupported = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  
-  const win = window as SpeechSynthesisWindow;
-  
-  // Check for existence
-  if (!('speechSynthesis' in win)) return false;
-  if (!win.speechSynthesis) return false;
-  
-  // Check if it's actually functional
-  try {
-    // Some browsers return voices array synchronously
-    const voices = win.speechSynthesis.getVoices();
-    return Array.isArray(voices);
-  } catch (error) {
-    console.warn('Speech synthesis check failed:', error);
-    return false;
-  }
-};
-
-// Custom hook for safe speech synthesis with mobile support
-const useSafeSpeechSynthesis = () => {
-  const [isSupported, setIsSupported] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-  
-  const [synth, setSynth] = useState<SpeechSynthesis | null>(null);
-  const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [requiresUserInteraction, setRequiresUserInteraction] = useState(false);
-  const userInteractedRef = useRef(false);
-  
-  // Handle user interaction for mobile autoplay policies
-  const handleUserInteraction = () => {
-    userInteractedRef.current = true;
-    setIsReady(true);
-    
-    // Remove event listeners after first interaction
-    document.removeEventListener('click', handleUserInteraction);
-    document.removeEventListener('touchstart', handleUserInteraction);
-    document.removeEventListener('keydown', handleUserInteraction);
-  };
-
-  
-  
-  useEffect(() => {
-    // Mobile browsers require user interaction before playing audio
-    if (detectEnvironment() === 'mobile') {
-      console.log('📱 Mobile detected - waiting for user interaction');
-      setRequiresUserInteraction(true);
-      
-      // Add event listeners for user interaction
-      document.addEventListener('click', handleUserInteraction);
-      document.addEventListener('touchstart', handleUserInteraction);
-      document.addEventListener('keydown', handleUserInteraction);
-      
-      // Small timeout to ensure listeners are added
-      setTimeout(() => {
-        if (!userInteractedRef.current) {
-          console.log('⏳ Waiting for user tap/click to enable sound...');
-        }
-      }, 100);
-    } else {
-      setIsReady(true);
-    }
-    
-    const checkSupport = () => {
-      const supported = isSpeechSynthesisSupported();
-      setIsSupported(supported);
-      
-      if (supported && window.speechSynthesis) {
-        setSynth(window.speechSynthesis);
-        
-        const loadVoices = () => {
-          try {
-            const availableVoices = window.speechSynthesis!.getVoices();
-            setVoices(availableVoices);
-            
-            if (availableVoices.length > 0) {
-              // Mobile-friendly voice selection
-              let preferredVoice = availableVoices[0];
-              
-              // Try to find a mobile-optimized voice
-              if (detectEnvironment() === 'mobile') {
-                // On mobile, prefer compact voices
-                const mobileVoice = availableVoices.find(v => 
-                  v.lang.includes('en') && 
-                  (v.name.toLowerCase().includes('compact') || 
-                   v.name.toLowerCase().includes('siri') ||
-                   v.name.toLowerCase().includes('google'))
-                );
-                if (mobileVoice) {
-                  preferredVoice = mobileVoice;
-                }
-              } else {
-                // On desktop, prefer higher quality voices
-                const desktopVoice = availableVoices.find(v => 
-                  v.lang.includes('en') && 
-                  !v.name.toLowerCase().includes('compact')
-                );
-                if (desktopVoice) {
-                  preferredVoice = desktopVoice;
-                }
-              }
-              
-              setSelectedVoice(preferredVoice);
-              console.log('✅ Speech synthesis initialized with', availableVoices.length, 'voices');
-              console.log('🎙️ Selected voice:', preferredVoice.name);
-            }
-          } catch (error) {
-            console.error('Error loading voices:', error);
-          }
-        };
-        
-        loadVoices();
-        
-        // Some browsers need this event
-        if (window.speechSynthesis.onvoiceschanged !== undefined) {
-          window.speechSynthesis.onvoiceschanged = loadVoices;
-        }
-        
-        // Try loading voices again after a delay
-        setTimeout(loadVoices, 1000);
-      } else {
-        console.warn('⚠️ Speech synthesis not supported in this environment');
-        console.warn('Environment:', detectEnvironment());
-        console.warn('User Agent:', navigator.userAgent);
-      }
-    };
-    
-    // Only run in browser
-    if (typeof window !== 'undefined') {
-      // Small delay to ensure DOM is ready
-      setTimeout(checkSupport, 100);
-    }
-    
-    // Cleanup
-    return () => {
-      if (synth) {
-        synth.cancel();
-      }
-      // Clean up event listeners
-      document.removeEventListener('click', handleUserInteraction);
-      document.removeEventListener('touchstart', handleUserInteraction);
-      document.removeEventListener('keydown', handleUserInteraction);
-    };
-  }, []);
-  
-  return { 
-    isSupported, 
-    isReady: isReady || !requiresUserInteraction, // Ready if not mobile or user interacted
-    requiresUserInteraction,
-    userInteractedRef,
-    synth, 
-    selectedVoice, 
-    voices 
-  };
-};
 
 interface BingoCardData {
   columns: {
@@ -235,41 +61,207 @@ interface WinDetails {
   position?: number;
   prizeAmount?: number;
   message?: string;
+  winType?: string;
+  winPattern?: number[];
 }
 
 interface MultiplayerSession {
   code: string;
   userId: string;
   sessionId: number;
-  hostId?: string;
+  status: 'waiting' | 'countdown' | 'active' | 'finished';
 }
 
-export default function BingoGame() {
-  const [called, setCalled] = useState<number[]>([])
-  const [autoTimer, setAutoTimer] = useState<NodeJS.Timeout | null>(null)
-  const [cardMatrix, setCardMatrix] = useState<Array<Array<any>>>([])
-  const [isWinner, setIsWinner] = useState(false)
-  const [autoToggle, setAutoToggle] = useState(true)
-  const [isMuted, setIsMuted] = useState(false)
-  const [volume, setVolume] = useState(0.8)
-  const [recentCalls, setRecentCalls] = useState<string[]>(["—", "—", "—"])
+interface Player {
+  user_id: string;
+  username?: string;
+  first_name?: string;
+  player_status: string;
+}
+
+// Environment detection
+const detectEnvironment = (): string => {
+  if (typeof window === 'undefined') return 'server';
   
-  // Game state
-  const [gameState, setGameState] = useState<CurrentGameData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [winDetails, setWinDetails] = useState<WinDetails | null>(null)
-  const [leaderboardData, setLeaderboardData] = useState<any[]>([])
+  const userAgent = navigator.userAgent.toLowerCase();
+  
+  if (userAgent.includes('telegram')) {
+    return 'telegram';
+  } else if (/android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent)) {
+    return 'mobile';
+  } else {
+    return 'desktop';
+  }
+};
+
+// Speech synthesis support check
+const isSpeechSynthesisSupported = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  
+  const win = window as SpeechSynthesisWindow;
+  
+  if (!('speechSynthesis' in win)) return false;
+  if (!win.speechSynthesis) return false;
+  
+  try {
+    const voices = win.speechSynthesis.getVoices();
+    return Array.isArray(voices);
+  } catch (error) {
+    console.warn('Speech synthesis check failed:', error);
+    return false;
+  }
+};
+
+// Custom hook for safe speech synthesis
+const useSafeSpeechSynthesis = () => {
+  const [isSupported, setIsSupported] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const [synth, setSynth] = useState<SpeechSynthesis | null>(null);
+  const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [requiresUserInteraction, setRequiresUserInteraction] = useState(false);
+  const userInteractedRef = useRef(false);
+  
+  const handleUserInteraction = useCallback(() => {
+    userInteractedRef.current = true;
+    setIsReady(true);
+    
+    document.removeEventListener('click', handleUserInteraction);
+    document.removeEventListener('touchstart', handleUserInteraction);
+    document.removeEventListener('keydown', handleUserInteraction);
+  }, []);
+
+  useEffect(() => {
+    if (detectEnvironment() === 'mobile') {
+      console.log('📱 Mobile detected - waiting for user interaction');
+      setRequiresUserInteraction(true);
+      
+      document.addEventListener('click', handleUserInteraction);
+      document.addEventListener('touchstart', handleUserInteraction);
+      document.addEventListener('keydown', handleUserInteraction);
+      
+      setTimeout(() => {
+        if (!userInteractedRef.current) {
+          console.log('⏳ Waiting for user tap/click to enable sound...');
+        }
+      }, 100);
+    } else {
+      setIsReady(true);
+    }
+    
+    const checkSupport = () => {
+      const supported = isSpeechSynthesisSupported();
+      setIsSupported(supported);
+      
+      if (supported && window.speechSynthesis) {
+        setSynth(window.speechSynthesis);
+        
+        const loadVoices = () => {
+          try {
+            const availableVoices = window.speechSynthesis!.getVoices();
+            setVoices(availableVoices);
+            
+            if (availableVoices.length > 0) {
+              let preferredVoice = availableVoices[0];
+              
+              if (detectEnvironment() === 'mobile') {
+                const mobileVoice = availableVoices.find(v => 
+                  v.lang.includes('en') && 
+                  (v.name.toLowerCase().includes('compact') || 
+                   v.name.toLowerCase().includes('siri') ||
+                   v.name.toLowerCase().includes('google'))
+                );
+                if (mobileVoice) preferredVoice = mobileVoice;
+              } else {
+                const desktopVoice = availableVoices.find(v => 
+                  v.lang.includes('en') && 
+                  !v.name.toLowerCase().includes('compact')
+                );
+                if (desktopVoice) preferredVoice = desktopVoice;
+              }
+              
+              setSelectedVoice(preferredVoice);
+              console.log('✅ Speech synthesis initialized with', availableVoices.length, 'voices');
+              console.log('🎙️ Selected voice:', preferredVoice.name);
+            }
+          } catch (error) {
+            console.error('Error loading voices:', error);
+          }
+        };
+        
+        loadVoices();
+        
+        if (window.speechSynthesis.onvoiceschanged !== undefined) {
+          window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
+        
+        setTimeout(loadVoices, 1000);
+      } else {
+        console.warn('⚠️ Speech synthesis not supported in this environment');
+      }
+    };
+    
+    if (typeof window !== 'undefined') {
+      setTimeout(checkSupport, 100);
+    }
+    
+    return () => {
+      if (synth) synth.cancel();
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('touchstart', handleUserInteraction);
+      document.removeEventListener('keydown', handleUserInteraction);
+    };
+  }, [handleUserInteraction, synth]);
+  
+  return { 
+    isSupported, 
+    isReady: isReady || !requiresUserInteraction,
+    requiresUserInteraction,
+    userInteractedRef,
+    synth, 
+    selectedVoice, 
+    voices 
+  };
+};
+
+export default function BingoGame() {
+  // Core game state
+  const [called, setCalled] = useState<number[]>([]);
+  const [cardMatrix, setCardMatrix] = useState<Array<Array<any>>>([]);
+  const [isWinner, setIsWinner] = useState(false);
+  const [recentCalls, setRecentCalls] = useState<string[]>(["—", "—", "—"]);
+  
+  // Game data state
+  const [gameState, setGameState] = useState<CurrentGameData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [winDetails, setWinDetails] = useState<WinDetails | null>(null);
   
   // Multiplayer state
-  const [multiplayerSession, setMultiplayerSession] = useState<MultiplayerSession | null>(null)
-  const [isHost, setIsHost] = useState(false)
-  const [syncedCalled, setSyncedCalled] = useState<number[]>([])
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null)
-  const [players, setPlayers] = useState<any[]>([])
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'syncing'>('connected')
+  const [multiplayerSession, setMultiplayerSession] = useState<MultiplayerSession | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'syncing'>('connected');
+  const [syncedCalled, setSyncedCalled] = useState<number[]>([]);
   
-  // Use safe speech synthesis hook
+  // Game status and countdown
+  const [gameStatus, setGameStatus] = useState<'waiting' | 'countdown' | 'playing' | 'finished'>('waiting');
+  const [countdown, setCountdown] = useState<number>(50);
+  const [playersReady, setPlayersReady] = useState<Record<string, boolean>>({});
+  
+  // Auto-call settings - NOW EVERYONE CAN AUTO-CALL
+  const [callInterval] = useState<number>(3000); // 3 seconds default
+  const [isAutoCalling, setIsAutoCalling] = useState<boolean>(false);
+  const [autoToggle, setAutoToggle] = useState(true); // For single player mode
+  
+  // Audio settings
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(0.8);
+  
+  // Environment
+  const [environment, setEnvironment] = useState<string>('unknown');
+  const [showMobileSoundPrompt, setShowMobileSoundPrompt] = useState(false);
+  
+  // Speech synthesis
   const { 
     isSupported: isSpeechSupported, 
     isReady: isSpeechReady,
@@ -280,92 +272,92 @@ export default function BingoGame() {
   } = useSafeSpeechSynthesis();
   
   // Refs
-  const synthRef = useRef<SpeechSynthesis | null>(null)
-  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null)
-  const isSpeakingRef = useRef(false)
-  const isCallingRef = useRef(false)
-  const classicGridRef = useRef<HTMLDivElement>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const clickSoundRef = useRef<HTMLAudioElement | null>(null)
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  
-  // Environment detection
-  const [environment, setEnvironment] = useState<string>('unknown')
-  const [showMobileSoundPrompt, setShowMobileSoundPrompt] = useState(false)
-  
-  // Fetch current game on component mount
-  useEffect(() => {
-    fetchCurrentGame()
-    
-    // Get multiplayer session info
-    const storedSession = localStorage.getItem('multiplayerSession');
-    if (storedSession) {
-      try {
-        const session = JSON.parse(storedSession);
-        setMultiplayerSession(session);
-        
-        // Check if this player is the host (you might need to determine this from your game state)
-        // For now, assume first player is host - you'll need to set this when creating the session
-        const isUserHost = localStorage.getItem('isHost') === 'true';
-        setIsHost(isUserHost);
-        
-        console.log('Multiplayer session loaded:', session);
-        console.log('Is host:', isUserHost);
-      } catch (e) {
-        console.error('Failed to parse multiplayer session:', e);
-      }
-    }
-    
-    // Initialize fallback audio for mobile
-    if (typeof window !== 'undefined' && detectEnvironment() === 'mobile') {
-      // Preload click sound for mobile fallback
-      clickSoundRef.current = new Audio();
-      clickSoundRef.current.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ';
-      clickSoundRef.current.load();
-      
-      // Show prompt after a delay if user hasn't interacted
-      const promptTimer = setTimeout(() => {
-        if (requiresUserInteraction && !userInteractedRef.current) {
-          setShowMobileSoundPrompt(true);
-        }
-      }, 2000);
-      
-      return () => clearTimeout(promptTimer);
-    }
-  }, [])
+  const synthRef = useRef<SpeechSynthesis | null>(null);
+  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const isSpeakingRef = useRef(false);
+  const isCallingRef = useRef(false);
+  const classicGridRef = useRef<HTMLDivElement>(null);
+  const clickSoundRef = useRef<HTMLAudioElement | null>(null);
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const autoCallIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoTimerRef = useRef<NodeJS.Timeout | null>(null); // For single player
+  const hasInitializedRef = useRef(false);
 
-  // Initialize environment detection
+  // ==================== INITIALIZATION ====================
+
+  // Initialize component
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
+    const init = async () => {
+      await fetchCurrentGame();
+      
+      // Get multiplayer session info
+      const storedSession = localStorage.getItem('multiplayerSession');
+      if (storedSession) {
+        try {
+          const session = JSON.parse(storedSession);
+          setMultiplayerSession(session);
+          console.log('Multiplayer session loaded:', session);
+        } catch (e) {
+          console.error('Failed to parse multiplayer session:', e);
+        }
+      }
+      
+      // Initialize fallback audio for mobile
+      if (typeof window !== 'undefined' && detectEnvironment() === 'mobile') {
+        clickSoundRef.current = new Audio();
+        clickSoundRef.current.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ';
+        clickSoundRef.current.load();
+        
+        const promptTimer = setTimeout(() => {
+          if (requiresUserInteraction && !userInteractedRef.current) {
+            setShowMobileSoundPrompt(true);
+          }
+        }, 2000);
+        
+        return () => clearTimeout(promptTimer);
+      }
+    };
+
+    init();
+
+    return () => {
+      // Cleanup all intervals and timeouts
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+      if (autoCallIntervalRef.current) clearInterval(autoCallIntervalRef.current);
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+      if (synthRef.current) synthRef.current.cancel();
+    };
+  }, []);
+
+  // Environment detection
   useEffect(() => {
     const env = detectEnvironment();
     setEnvironment(env);
     console.log('🌍 Detected environment:', env);
     
-    // Apply environment-specific adjustments
     if (env === 'telegram') {
       console.log('⚠️ Running in Telegram WebView - applying compatibility fixes');
-      
-      // Force disable voice if not supported in Telegram
       if (!isSpeechSupported) {
         console.log('🔇 Speech not supported in Telegram, forcing silent mode');
         setIsMuted(true);
       }
     } else if (env === 'mobile') {
       console.log('📱 Mobile browser detected - adjusting for mobile autoplay policies');
-      
-      // On mobile, lower default volume slightly
       setVolume(0.7);
-      
-      // Enable sound by default on mobile (user can mute if needed)
       setIsMuted(false);
     }
   }, [isSpeechSupported]);
 
-  // Sync safe speech synthesis with refs
+  // Sync speech synthesis refs
   useEffect(() => {
     if (isSpeechSupported && safeSynth) {
       synthRef.current = safeSynth;
     }
-    
     if (safeSelectedVoice) {
       selectedVoiceRef.current = safeSelectedVoice;
     }
@@ -374,28 +366,93 @@ export default function BingoGame() {
   // Auto-hide mobile sound prompt
   useEffect(() => {
     if (showMobileSoundPrompt && userInteractedRef.current) {
-      const timer = setTimeout(() => {
-        setShowMobileSoundPrompt(false);
-      }, 3000);
-      
+      const timer = setTimeout(() => setShowMobileSoundPrompt(false), 3000);
       return () => clearTimeout(timer);
     }
   }, [showMobileSoundPrompt, userInteractedRef.current]);
 
-  // Start syncing called numbers with server for multiplayer
-  useEffect(() => {
-    if (!multiplayerSession?.code || !multiplayerSession?.sessionId) {
-      // Not in multiplayer mode
-      return;
+  // ==================== MULTIPLAYER SYNC ====================
+
+  // Sync called numbers from server
+  const syncCalledNumbers = useCallback(async () => {
+    if (!multiplayerSession?.code) return;
+
+    try {
+      setConnectionStatus('syncing');
+      
+      const response = await fetch(`/api/game/sessions?code=${multiplayerSession.code}&userId=${gameState?.user?.id}`);
+      const data = await response.json();
+
+      if (data.success && data.session) {
+        const serverCalled = data.session.calledNumbers || [];
+        setPlayers(data.players || []);
+        
+        // Update game status
+        const serverStatus = data.session.status;
+        let newStatus: 'waiting' | 'countdown' | 'playing' | 'finished' = 'waiting';
+        
+        if (serverStatus === 'active') {
+          newStatus = 'playing';
+        } else if (serverStatus === 'countdown') {
+          newStatus = 'countdown';
+          setCountdown(data.session.countdownRemaining || 50);
+        } else if (serverStatus === 'finished') {
+          newStatus = 'finished';
+          stopAutoCalling();
+        }
+        
+        if (newStatus !== gameStatus) {
+          setGameStatus(newStatus);
+          
+          if (newStatus === 'playing' && gameStatus !== 'playing') {
+            console.log('🎮 Game started!');
+            if (!isMuted && isSpeechReady) {
+              speak("Game started! Numbers will be called automatically!");
+            }
+          }
+        }
+        
+        // Update player ready status
+        const readyState: Record<string, boolean> = {};
+        data.players?.forEach((p: Player) => {
+          readyState[p.user_id] = p.player_status === 'ready' || p.player_status === 'playing';
+        });
+        setPlayersReady(readyState);
+        
+        // Update called numbers if changed
+        if (JSON.stringify(serverCalled) !== JSON.stringify(syncedCalled)) {
+          console.log('Syncing called numbers from server:', serverCalled);
+          setCalled(serverCalled);
+          setSyncedCalled(serverCalled);
+          
+          if (serverCalled.length > 0) {
+            const newRecent = [...recentCalls];
+            const lastNum = serverCalled[serverCalled.length - 1];
+            const letter = getLetter(lastNum);
+            newRecent.unshift(`${letter}-${lastNum}`);
+            newRecent.pop();
+            setRecentCalls(newRecent);
+          }
+          
+          updateCardMatches(serverCalled);
+        }
+        
+        setConnectionStatus('connected');
+      }
+    } catch (error) {
+      console.error('Failed to sync called numbers:', error);
+      setConnectionStatus('disconnected');
     }
+  }, [multiplayerSession, gameState, gameStatus, syncedCalled, recentCalls, isMuted, isSpeechReady]);
+
+  // Start multiplayer sync
+  useEffect(() => {
+    if (!multiplayerSession?.code || !multiplayerSession?.sessionId) return;
 
     console.log('Starting multiplayer sync for session:', multiplayerSession.code);
     setConnectionStatus('connected');
 
-    // Initial sync
     syncCalledNumbers();
-
-    // Set up polling every 2 seconds
     syncIntervalRef.current = setInterval(syncCalledNumbers, 2000);
 
     return () => {
@@ -404,95 +461,273 @@ export default function BingoGame() {
         syncIntervalRef.current = null;
       }
     };
-  }, [multiplayerSession]);
+  }, [multiplayerSession, syncCalledNumbers]);
 
-  // Disable auto mode in multiplayer - numbers come from host
+  // ==================== COUNTDOWN TIMER ====================
+
   useEffect(() => {
-    if (multiplayerSession) {
-      console.log('Multiplayer mode detected - disabling auto call');
-      setAutoToggle(false);
-      if (autoTimer) {
-        clearInterval(autoTimer);
-        setAutoTimer(null);
+    if (gameStatus === 'countdown' && countdown > 0) {
+      countdownTimerRef.current = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) {
+            setGameStatus('playing');
+            clearInterval(countdownTimerRef.current!);
+            
+            if (!isMuted && isSpeechReady) {
+              speak("Game started! Numbers will be called automatically!");
+            }
+            
+            // Start auto-calling for everyone when game starts
+            if (multiplayerSession) {
+              startAutoCalling();
+            }
+            
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      
+      return () => {
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+        }
+      };
+    }
+  }, [gameStatus, countdown, isMuted, isSpeechReady, multiplayerSession]);
+
+  // ==================== AUTO-CALLING LOGIC - EVERYONE CAN AUTO-CALL ====================
+
+  const startAutoCalling = useCallback(() => {
+    // In multiplayer, everyone can auto-call
+    // We just need to make sure we don't double-call the same number
+    if (autoCallIntervalRef.current) {
+      clearInterval(autoCallIntervalRef.current);
+    }
+    
+    setIsAutoCalling(true);
+    console.log('🎮 Started auto-calling');
+    
+    autoCallIntervalRef.current = setInterval(() => {
+      if (gameStatus === 'playing' && !isWinner && called.length < 75) {
+        autoCallNextNumber();
+      } else if (called.length >= 75) {
+        stopAutoCalling();
+      }
+    }, callInterval);
+  }, [gameStatus, isWinner, called.length, callInterval]);
+
+  const stopAutoCalling = useCallback(() => {
+    if (autoCallIntervalRef.current) {
+      clearInterval(autoCallIntervalRef.current);
+      autoCallIntervalRef.current = null;
+    }
+    setIsAutoCalling(false);
+    console.log('⏹️ Auto-calling stopped');
+  }, []);
+
+  const autoCallNextNumber = useCallback(async () => {
+    if (isCallingRef.current || isWinner || gameStatus !== 'playing') return;
+    
+    // Find all numbers that haven't been called yet
+    const availableNumbers = [];
+    for (let i = 1; i <= 75; i++) {
+      if (!called.includes(i)) {
+        availableNumbers.push(i);
       }
     }
-  }, [multiplayerSession]);
+    
+    if (availableNumbers.length === 0) return;
+    
+    // Pick a RANDOM number from available numbers
+    const randomIndex = Math.floor(Math.random() * availableNumbers.length);
+    const nextNumber = availableNumbers[randomIndex];
+    
+    console.log(`🎲 Auto-calling random number: ${nextNumber}`);
+    await callNumber(nextNumber);
+  }, [called, isWinner, gameStatus]);
 
   // Handle auto toggle for single player
   useEffect(() => {
-    // Don't run auto in multiplayer mode
-    if (multiplayerSession) return;
+    if (multiplayerSession) return; // Don't use this in multiplayer
     
-    if (autoToggle && !isWinner) {
-      const timer = setInterval(() => {
+    if (autoToggle && !isWinner && gameStatus === 'playing') {
+      autoTimerRef.current = setInterval(() => {
         if (called.length >= 75 || isCallingRef.current || isWinner) {
           if (called.length >= 75) {
-            clearInterval(timer)
-            setAutoToggle(false)
+            clearInterval(autoTimerRef.current!);
+            setAutoToggle(false);
           }
-          return
+          return;
         }
-        let n
+        
+        // Find random uncalled number
+        let n;
         do {
-          n = Math.floor(Math.random() * 75) + 1
-        } while (called.includes(n))
-        callNumber(n)
-      }, 3000)
-      
-      setAutoTimer(timer as any)
+          n = Math.floor(Math.random() * 75) + 1;
+        } while (called.includes(n));
+        
+        callNumber(n);
+      }, 3000);
       
       return () => {
-        clearInterval(timer)
-      }
+        if (autoTimerRef.current) {
+          clearInterval(autoTimerRef.current);
+        }
+      };
     } else {
-      if (autoTimer) {
-        clearInterval(autoTimer)
-        setAutoTimer(null)
+      if (autoTimerRef.current) {
+        clearInterval(autoTimerRef.current);
+        autoTimerRef.current = null;
       }
     }
-  }, [autoToggle, called, isWinner, multiplayerSession])
+  }, [autoToggle, called, isWinner, multiplayerSession, gameStatus]);
 
-  // Fetch current game from API
+  // ==================== API CALLS ====================
+
   const fetchCurrentGame = async () => {
     try {
-      setLoading(true)
-      setError(null)
+      setLoading(true);
+      setError(null);
       
+      const token = localStorage.getItem('token');
       const response = await fetch('/api/game/current', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          'Authorization': `Bearer ${token || ''}`
         }
-      })
+      });
       
-      const result: ApiResponse<CurrentGameData> = await response.json()
+      const result: ApiResponse<CurrentGameData> = await response.json();
       
       if (!result.success) {
-        throw new Error(result.message || 'Failed to fetch game')
+        throw new Error(result.message || 'Failed to fetch game');
       }
       
       if (result.data) {
-        setGameState(result.data)
-        // Transform card data to matrix format
-        const matrix = transformCardData(result.data.bingoCard.cardData)
-        setCardMatrix(matrix)
-        console.log('Game loaded successfully:', result.data)
+        setGameState(result.data);
+        const matrix = transformCardData(result.data.bingoCard.cardData);
+        setCardMatrix(matrix);
+        console.log('Game loaded successfully:', result.data);
       }
-      
     } catch (err: any) {
-      setError(err.message || 'Failed to load game')
-      console.error('Error fetching game:', err)
+      setError(err.message || 'Failed to load game');
+      console.error('Error fetching game:', err);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  // Transform card data from API to matrix format
-  const transformCardData = (cardData: BingoCardData) => {
-    const matrix = []
+  const callNumberToServer = async (num: number): Promise<{success: boolean; calledNumbers?: number[]; alreadyCalled?: boolean}> => {
+    if (!multiplayerSession?.sessionId || !gameState?.user?.id) {
+      return { success: false };
+    }
+
+    try {
+      const response = await fetch('/api/game/call-number', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: multiplayerSession.sessionId,
+          number: num,
+          userId: gameState.user.id,
+          timestamp: Date.now()
+        })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Failed to call number to server:', error);
+      return { success: false };
+    }
+  };
+
+  const declareWinToServer = async (winType: string, pattern: number[]): Promise<boolean> => {
+    if (!multiplayerSession?.sessionId || !gameState?.user?.id) return false;
+
+    try {
+      const response = await fetch('/api/game/declare-win', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        },
+        body: JSON.stringify({
+          sessionId: multiplayerSession.sessionId,
+          userId: gameState.user.id,
+          winType,
+          pattern,
+          calledNumbers: called,
+          cartelaNumber: gameState.cartela.cartelaNumber
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        console.log('Win declared successfully:', data);
+        
+        if (data.winDetails) {
+          setWinDetails(data.winDetails);
+          
+          if (data.winDetails.isFirstWinner) {
+            setGameStatus('finished');
+            stopAutoCalling();
+          }
+        }
+        
+        return true;
+      } else {
+        console.log('Win declaration rejected:', data.message);
+        
+        if (data.message?.includes('already won')) {
+          alert('Someone else already won this round!');
+          setGameStatus('finished');
+          stopAutoCalling();
+        }
+        
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to declare win:', error);
+      return false;
+    }
+  };
+
+  const readyUp = async () => {
+    if (!multiplayerSession?.sessionId || !gameState?.user?.id) return;
     
-    // Initialize 5x5 matrix
+    try {
+      const response = await fetch('/api/game/ready', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        },
+        body: JSON.stringify({
+          sessionId: multiplayerSession.sessionId,
+          userId: gameState.user.id,
+          ready: true
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('Ready status updated');
+      }
+    } catch (error) {
+      console.error('Failed to ready up:', error);
+    }
+  };
+
+  // ==================== GAME LOGIC ====================
+
+  const transformCardData = (cardData: BingoCardData) => {
+    const matrix = [];
+    
     for (let row = 0; row < 5; row++) {
-      const rowArray = []
+      const rowArray = [];
       for (let col = 0; col < 5; col++) {
         rowArray.push({
           text: '',
@@ -501,12 +736,11 @@ export default function BingoGame() {
           isWin: false,
           row,
           col
-        })
+        });
       }
-      matrix.push(rowArray)
+      matrix.push(rowArray);
     }
     
-    // Fill matrix with card data
     cardData.numbers.forEach(cell => {
       if (cell.row !== undefined && cell.col !== undefined) {
         matrix[cell.row][cell.col] = {
@@ -516,109 +750,69 @@ export default function BingoGame() {
           isWin: false,
           row: cell.row,
           col: cell.col
-        }
+        };
       }
-    })
-    
-    return matrix
-  }
-
-  // Sync called numbers from server
-  const syncCalledNumbers = async () => {
-    if (!multiplayerSession?.code) return;
-
-    try {
-      setConnectionStatus('syncing');
-      
-      const response = await fetch(`/api/game/sessions?code=${multiplayerSession.code}`);
-      const data = await response.json();
-
-      if (data.success && data.session) {
-        const serverCalled = data.session.calledNumbers || [];
-        setPlayers(data.players || []);
-        
-        // Update local state if server has different numbers
-        if (JSON.stringify(serverCalled) !== JSON.stringify(syncedCalled)) {
-          console.log('Syncing called numbers from server:', serverCalled);
-          setSyncedCalled(serverCalled);
-          
-          // Update the called state
-          setCalled(serverCalled);
-          
-          // Update recent calls
-          if (serverCalled.length > 0) {
-            const newRecent = [...recentCalls];
-            const lastNum = serverCalled[serverCalled.length - 1];
-            const letter = getLetter(lastNum);
-            newRecent.unshift(`${letter}-${lastNum}`);
-            newRecent.pop();
-            setRecentCalls(newRecent);
-          } else {
-            setRecentCalls(["—", "—", "—"]);
-          }
-          
-          // Update card matches
-          updateCardMatches(serverCalled);
-          
-          setLastSyncTime(new Date());
-        }
-        
-        setConnectionStatus('connected');
-      }
-    } catch (error) {
-      console.error('Failed to sync called numbers:', error);
-      setConnectionStatus('disconnected');
-    }
-  };
-
-  // Update card matches based on called numbers
-  const updateCardMatches = (calledNumbers: number[]) => {
-    const newCardMatrix = [...cardMatrix];
-    
-    newCardMatrix.forEach((row, rowIndex) => {
-      row.forEach((cell, colIndex) => {
-        if (cell.num && calledNumbers.includes(cell.num)) {
-          newCardMatrix[rowIndex][colIndex] = {
-            ...cell,
-            isMatch: true
-          };
-        }
-      });
     });
     
-    setCardMatrix(newCardMatrix);
-    
-    // Check for win with updated matches
-    checkWin(newCardMatrix);
+    return matrix;
   };
 
-  // Speech functions
+  const updateCardMatches = (calledNumbers: number[]) => {
+    setCardMatrix(prevMatrix => {
+      const newMatrix = JSON.parse(JSON.stringify(prevMatrix)); // Deep copy
+      
+      newMatrix.forEach((row: any[], rowIndex: number) => {
+        row.forEach((cell: any, colIndex: number) => {
+          if (cell.num && calledNumbers.includes(cell.num)) {
+            newMatrix[rowIndex][colIndex] = {
+              ...cell,
+              isMatch: true
+            };
+          }
+        });
+      });
+      
+      // Check for win after updating matches
+      setTimeout(() => {
+        checkWin(newMatrix);
+      }, 100);
+      
+      return newMatrix;
+    });
+  };
+
+  const getLetter = (n: number): string => {
+    if (n <= 15) return "B";
+    if (n <= 30) return "I";
+    if (n <= 45) return "N";
+    if (n <= 60) return "G";
+    return "O";
+  };
+
   const getNumberWord = (num: number): string => {
     const words = [
       'zero', 'one', 'two', 'three', 'four', 'five', 
       'six', 'seven', 'eight', 'nine', 'ten',
       'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
       'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'
-    ]
+    ];
     
     const tensWords = [
       '', '', 'twenty', 'thirty', 'forty', 'fifty', 
       'sixty', 'seventy', 'eighty', 'ninety'
-    ]
+    ];
     
-    if (num <= 20) return words[num]
+    if (num <= 20) return words[num];
     if (num < 100) {
-      const tens = Math.floor(num / 10)
-      const ones = num % 10
-      if (ones === 0) return tensWords[tens]
-      return tensWords[tens] + ' ' + words[ones]
+      const tens = Math.floor(num / 10);
+      const ones = num % 10;
+      if (ones === 0) return tensWords[tens];
+      return tensWords[tens] + ' ' + words[ones];
     }
-    return num.toString()
-  }
+    return num.toString();
+  };
 
-  // Mobile-friendly speak function
   const speak = (text: string, callback?: () => void) => {
-    // Check all conditions for speaking
     const canSpeak = isSpeechSupported && 
                      selectedVoiceRef.current && 
                      synthRef.current && 
@@ -627,37 +821,26 @@ export default function BingoGame() {
                      isSpeechReady;
     
     if (!canSpeak) {
-      console.log('Speech skipped:', { 
-        isSpeechSupported, 
-        hasVoice: !!selectedVoiceRef.current,
-        hasSynth: !!synthRef.current,
-        isSpeaking: isSpeakingRef.current,
-        isMuted,
-        isSpeechReady
-      });
+      console.log('Speech skipped');
       
-      // On mobile, try fallback sound
       if (environment === 'mobile' && !isMuted && isSpeechReady) {
         playMobileFallbackSound();
       }
       
-      // Still call callback for flow consistency
       if (callback) {
-        setTimeout(callback, 100); // Small delay for natural feel
+        setTimeout(callback, 100);
       }
       return;
     }
     
     try {
-      // For mobile, use shorter utterances and slower rate
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.voice = selectedVoiceRef.current;
       
-      // Adjust settings based on environment
       if (environment === 'mobile') {
-        utterance.rate = 0.8; // Slower for mobile
+        utterance.rate = 0.8;
         utterance.pitch = 1.0;
-        utterance.volume = volume * 0.9; // Slightly lower on mobile
+        utterance.volume = volume * 0.9;
       } else {
         utterance.rate = 0.9;
         utterance.pitch = 0.9;
@@ -675,7 +858,6 @@ export default function BingoGame() {
         console.error('Speech synthesis error:', error);
         isSpeakingRef.current = false;
         
-        // Try fallback on mobile
         if (environment === 'mobile') {
           playMobileFallbackSound();
         }
@@ -683,10 +865,8 @@ export default function BingoGame() {
         if (callback) callback();
       };
       
-      // Cancel any ongoing speech before starting new one
       synthRef.current.cancel();
       
-      // Small delay for mobile stability
       setTimeout(() => {
         synthRef.current!.speak(utterance);
       }, environment === 'mobile' ? 50 : 0);
@@ -695,7 +875,6 @@ export default function BingoGame() {
       console.error('Failed to create speech utterance:', error);
       isSpeakingRef.current = false;
       
-      // Try fallback on mobile
       if (environment === 'mobile') {
         playMobileFallbackSound();
       }
@@ -704,7 +883,6 @@ export default function BingoGame() {
     }
   };
 
-  // Mobile fallback sound (simple beep)
   const playMobileFallbackSound = () => {
     try {
       if (clickSoundRef.current && !isMuted) {
@@ -720,122 +898,74 @@ export default function BingoGame() {
   };
 
   const speakBingoNumber = (num: number, callback?: () => void) => {
-    const letter = getLetter(num)
-    let numberText: string
+    const letter = getLetter(num);
+    let numberText: string;
     
     if (num <= 20 || num % 10 === 0) {
-      numberText = getNumberWord(num)
+      numberText = getNumberWord(num);
     } else {
-      const tens = Math.floor(num / 10)
-      const ones = num % 10
-      numberText = `${getNumberWord(tens * 10)} ${getNumberWord(ones)}`
+      const tens = Math.floor(num / 10);
+      const ones = num % 10;
+      numberText = `${getNumberWord(tens * 10)} ${getNumberWord(ones)}`;
     }
     
-    // On mobile, use shorter text for better performance
     const speakText = environment === 'mobile' 
-      ? `${letter} ${num}`  // Just say "B 5" instead of "B five" on mobile
+      ? `${letter} ${num}`
       : `${letter} ${numberText}`;
     
-    speak(speakText, callback)
-  }
-
-  // Get letter for number
-  const getLetter = (n: number): string => {
-    if (n <= 15) return "B"
-    if (n <= 30) return "I"
-    if (n <= 45) return "N"
-    if (n <= 60) return "G"
-    return "O"
-  }
-
-  // Call number to server (for multiplayer host)
-  const callNumberToServer = async (num: number): Promise<boolean> => {
-    if (!multiplayerSession?.sessionId || !gameState?.user?.id) return false;
-
-    try {
-      const response = await fetch('/api/game/call-number', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: multiplayerSession.sessionId,
-          number: num,
-          userId: gameState.user.id
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        if (data.alreadyCalled) {
-          console.log('Number already called by another player');
-          return false;
-        }
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Failed to call number to server:', error);
-      return false;
-    }
+    speak(speakText, callback);
   };
 
-  // Main call number function (works for both single and multiplayer)
   const callNumber = async (num: number) => {
-    // In multiplayer, only host can call numbers
-    if (multiplayerSession && !isHost) {
-      console.log('Only the host can call numbers in multiplayer mode');
+    if (gameStatus !== 'playing') {
+      console.log('Game has not started yet');
+      if (gameStatus === 'countdown') {
+        alert(`Game starts in ${countdown} seconds. Please wait!`);
+      } else if (gameStatus === 'waiting') {
+        alert('Waiting for game to start...');
+      }
       return;
     }
 
-    if (called.includes(num) || isCallingRef.current || isWinner) return;
+    if (called.includes(num) || isCallingRef.current || isWinner) {
+      if (called.includes(num)) {
+        console.log(`Number ${num} already called`);
+      }
+      return;
+    }
 
-    // For multiplayer, send to server first
     if (multiplayerSession) {
       isCallingRef.current = true;
       
-      const success = await callNumberToServer(num);
+      const result = await callNumberToServer(num);
       
-      if (success) {
-        // Server will broadcast to all players via polling
-        console.log('Number called successfully:', num);
+      if (result.success) {
+        if (result.alreadyCalled) {
+          console.log('Number was already called by another player');
+          isCallingRef.current = false;
+          return;
+        }
         
-        // Immediately update local state for responsiveness
-        const newCalled = [...called, num];
-        setCalled(newCalled);
+        console.log(`✅ Number ${num} called successfully`);
         
-        const letter = getLetter(num);
-        const displayText = `${letter}-${num}`;
-        
-        const newRecent = [...recentCalls];
-        newRecent.unshift(displayText);
-        newRecent.pop();
-        setRecentCalls(newRecent);
-        
-        // Update card matrix
-        const newCardMatrix = [...cardMatrix];
-        newCardMatrix.forEach((row, rowIndex) => {
-          row.forEach((cell, colIndex) => {
-            if (cell.num === num) {
-              newCardMatrix[rowIndex][colIndex] = {
-                ...cell,
-                isMatch: true
-              };
-            }
+        // Server will sync via interval, but we can optimistically update
+        if (result.calledNumbers) {
+          setCalled(result.calledNumbers);
+          updateCardMatches(result.calledNumbers);
+          
+          // Update recent calls
+          const letter = getLetter(num);
+          setRecentCalls(prev => {
+            const newRecent = [ `${letter}-${num}`, ...prev.slice(0, 2) ];
+            return newRecent;
           });
-        });
+        }
         
-        setCardMatrix(newCardMatrix);
-        
-        // Speak the number
         speakBingoNumber(num, () => {
           isCallingRef.current = false;
-          
-          // Check for win
-          setTimeout(() => {
-            checkWin(newCardMatrix);
-          }, 100);
         });
       } else {
+        console.log('Failed to call number');
         isCallingRef.current = false;
       }
     } else {
@@ -848,16 +978,16 @@ export default function BingoGame() {
       const letter = getLetter(num);
       const displayText = `${letter}-${num}`;
       
-      const newRecent = [...recentCalls];
-      newRecent.unshift(displayText);
-      newRecent.pop();
-      setRecentCalls(newRecent);
+      setRecentCalls(prev => {
+        const newRecent = [displayText, ...prev.slice(0, 2)];
+        return newRecent;
+      });
       
-      const newCardMatrix = [...cardMatrix];
+      const newCardMatrix = JSON.parse(JSON.stringify(cardMatrix)); // Deep copy
       let cellUpdated = false;
       
-      newCardMatrix.forEach((row, rowIndex) => {
-        row.forEach((cell, colIndex) => {
+      newCardMatrix.forEach((row: any[], rowIndex: number) => {
+        row.forEach((cell: any, colIndex: number) => {
           if (cell.num === num) {
             newCardMatrix[rowIndex][colIndex] = {
               ...cell,
@@ -874,266 +1004,151 @@ export default function BingoGame() {
         isCallingRef.current = false;
         
         if (cellUpdated) {
-          setTimeout(() => {
-            checkWin(newCardMatrix);
-          }, 100);
+          checkWin(newCardMatrix);
         }
       });
     }
-  }
+  };
 
-  // Helper function to determine win type
-  const determineWinType = (winningCells: any[]): 'row' | 'column' | 'diagonal' | 'full-house' => {
-    const rows = new Set(winningCells.map(cell => cell.row))
-    const cols = new Set(winningCells.map(cell => cell.col))
-    
-    if (rows.size === 1) return 'row'
-    if (cols.size === 1) return 'column'
-    
-    // Check if it's the center diagonal
-    const isDiag1 = winningCells.every(cell => cell.row === cell.col)
-    const isDiag2 = winningCells.every(cell => cell.row + cell.col === 4)
-    
-    if (isDiag1 || isDiag2) return 'diagonal'
-    
-    // Check for full house (all cells marked)
-    const allCellsMarked = cardMatrix.flat().every(cell => cell.isMatch || cell.text === 'FREE')
-    if (allCellsMarked) return 'full-house'
-    
-    return 'row' // default
-  }
-
-  // Function to declare win to server
-  const declareWinToServer = async (winType: string, winPattern: number[]): Promise<boolean> => {
-    try {
-      if (!gameState) return false
-      
-      const winData = {
-        gameSessionId: multiplayerSession?.sessionId || gameState.bingoCard.id,
-        bingoCardId: gameState.bingoCard.id,
-        winType,
-        winPattern,
-        calledNumbers: called
-      }
-      
-      console.log('Declaring win to server:', winData)
-      
-      const response = await fetch('/api/game/win', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        },
-        body: JSON.stringify(winData)
-      })
-      
-      const result = await response.json()
-      
-      if (result.success && result.data) {
-        console.log('Win declared successfully:', result.data)
-        setWinDetails({
-          isFirstWinner: result.data.isFirstWinner,
-          position: result.data.winPosition,
-          prizeAmount: result.data.prizeAmount,
-          message: result.data.message
-        })
-        return true
-      } else {
-        console.error('Win declaration failed:', result.message)
-        return false
-      }
-      
-    } catch (error) {
-      console.error('Error declaring win:', error)
-      return false
-    }
-  }
-
-  // Check for win
-  const checkWin = async (matrix: any[][] = cardMatrix): Promise<boolean> => {
-    const wins = []
-    const winPatterns: number[][] = []
+  const checkWin = (matrix: any[][] = cardMatrix): boolean => {
+    const wins: {
+      type: string;
+      cells: any[];
+      pattern: number[];
+    }[] = [];
     
     // Check rows
     for (let r = 0; r < 5; r++) {
-      if (matrix[r].every(cell => cell.isMatch)) {
-        wins.push(matrix[r])
-        winPatterns.push(matrix[r].map(cell => cell.row * 5 + cell.col))
+      if (matrix[r].every((cell: any) => cell.isMatch)) {
+        const cells = matrix[r];
+        wins.push({
+          type: 'horizontal',
+          cells: cells,
+          pattern: cells.map((cell: any) => cell.row * 5 + cell.col)
+        });
       }
     }
     
     // Check columns
     for (let c = 0; c < 5; c++) {
-      const col = []
-      for (let r = 0; r < 5; r++) col.push(matrix[r][c])
-      if (col.every(cell => cell.isMatch)) {
-        wins.push(col)
-        winPatterns.push(col.map(cell => cell.row * 5 + cell.col))
+      const col = [];
+      for (let r = 0; r < 5; r++) col.push(matrix[r][c]);
+      if (col.every((cell: any) => cell.isMatch)) {
+        wins.push({
+          type: 'vertical',
+          cells: col,
+          pattern: col.map((cell: any) => cell.row * 5 + cell.col)
+        });
       }
     }
     
-    // Check diagonals
-    const diag1 = [matrix[0][0], matrix[1][1], matrix[2][2], matrix[3][3], matrix[4][4]]
-    const diag2 = [matrix[0][4], matrix[1][3], matrix[2][2], matrix[3][1], matrix[4][0]]
-    
-    if (diag1.every(cell => cell.isMatch)) {
-      wins.push(diag1)
-      winPatterns.push(diag1.map(cell => cell.row * 5 + cell.col))
+    // Check main diagonal
+    const diag1 = [matrix[0][0], matrix[1][1], matrix[2][2], matrix[3][3], matrix[4][4]];
+    if (diag1.every((cell: any) => cell.isMatch)) {
+      wins.push({
+        type: 'diagonal',
+        cells: diag1,
+        pattern: diag1.map((cell: any) => cell.row * 5 + cell.col)
+      });
     }
     
-    if (diag2.every(cell => cell.isMatch)) {
-      wins.push(diag2)
-      winPatterns.push(diag2.map(cell => cell.row * 5 + cell.col))
+    // Check other diagonal
+    const diag2 = [matrix[0][4], matrix[1][3], matrix[2][2], matrix[3][1], matrix[4][0]];
+    if (diag2.every((cell: any) => cell.isMatch)) {
+      wins.push({
+        type: 'diagonal',
+        cells: diag2,
+        pattern: diag2.map((cell: any) => cell.row * 5 + cell.col)
+      });
+    }
+    
+    // Check four corners
+    const corners = [matrix[0][0], matrix[0][4], matrix[4][0], matrix[4][4]];
+    if (corners.every((cell: any) => cell.isMatch)) {
+      wins.push({
+        type: 'corners',
+        cells: corners,
+        pattern: corners.map((cell: any) => cell.row * 5 + cell.col)
+      });
+    }
+    
+    // Check full house
+    const allCells = matrix.flat();
+    const allMarked = allCells.every((cell: any) => cell.isMatch || cell.text === 'FREE');
+    if (allMarked) {
+      wins.push({
+        type: 'full-house',
+        cells: allCells,
+        pattern: allCells.map((cell: any) => cell.row * 5 + cell.col)
+      });
     }
     
     if (wins.length > 0) {
-      console.log('🎉 BINGO DETECTED! Number of wins:', wins.length)
+      console.log('🎉 BINGO DETECTED!', wins);
       
-      // Determine win type
-      const winType = determineWinType(wins[0])
-      console.log('Win type:', winType)
+      // Mark winning cells
+      const newMatrix = JSON.parse(JSON.stringify(matrix)); // Deep copy
       
-      // Mark winning cells in UI
-      const newMatrix = [...matrix]
-      wins.flat().forEach(winCell => {
-        newMatrix.forEach((row, rowIndex) => {
-          row.forEach((cell, colIndex) => {
-            if (cell === winCell) {
-              newMatrix[rowIndex][colIndex] = {
-                ...cell,
-                isWin: true
+      wins.forEach(win => {
+        win.cells.forEach((winCell: any) => {
+          newMatrix.forEach((row: any[], rowIndex: number) => {
+            row.forEach((cell: any, colIndex: number) => {
+              if (cell === winCell || 
+                  (cell.row === winCell.row && cell.col === winCell.col)) {
+                newMatrix[rowIndex][colIndex] = {
+                  ...cell,
+                  isWin: true
+                };
               }
-            }
-          })
-        })
-      })
-      
-      // Update state for visual feedback
-      setCardMatrix(newMatrix)
-      
-      // Clear auto timer
-      setAutoToggle(false)
-      if (autoTimer) {
-        clearInterval(autoTimer)
-        setAutoTimer(null)
-      }
-      
-      // Set winner state for popup
-      setIsWinner(true)
-      
-      // Show immediate congratulations
-      setTimeout(() => {
-        if (gameState?.user?.username) {
-          speak(`BINGO! Congratulations ${gameState.user.username}! You won!`)
-        } else {
-          speak("BINGO! Congratulations!")
-        }
-      }, 300)
-      
-      // Declare win to server
-      declareWinToServer(winType, winPatterns[0]).then((success) => {
-        if (success) {
-          console.log('Win successfully declared to server')
-        } else {
-          console.warn('Win declaration to server failed, but local win is recorded')
-        }
-      }).catch((error) => {
-        console.error('Error declaring win:', error)
-      })
-      
-      return true
-    }
-    
-    return false
-  }
-
-  // Handle volume change
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVolume = parseFloat(e.target.value)
-    setVolume(newVolume)
-    
-    if (synthRef.current) {
-      synthRef.current.cancel()
-      isSpeakingRef.current = false
-    }
-  }
-  // Add this function to your BingoGame component
-const handleLeaveGame = async () => {
-  // Confirm with user
-  if (!confirm('Are you sure you want to leave the game?')) {
-    return;
-  }
-
-  try {
-    // If in multiplayer session, notify server
-    if (multiplayerSession?.sessionId && gameState?.user?.id) {
-      setConnectionStatus('disconnected');
-      
-      // Call API to remove player from session
-      const response = await fetch('/api/game/leave', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        },
-        body: JSON.stringify({
-          sessionId: multiplayerSession.sessionId,
-          userId: gameState.user.id
-        })
+            });
+          });
+        });
       });
       
-      const data = await response.json();
+      setCardMatrix(newMatrix);
       
-      if (data.success) {
-        console.log('Successfully left multiplayer session');
-        
-        // Show message if user was the host
-        if (isHost) {
-          alert('You were the host. The game will end for other players.');
-        }
-      } else {
-        console.error('Failed to leave session:', data.message);
+      // Stop auto-calling
+      stopAutoCalling();
+      setAutoToggle(false);
+      if (autoTimerRef.current) {
+        clearInterval(autoTimerRef.current);
+        autoTimerRef.current = null;
       }
-    }
-
-    // Clear multiplayer session from localStorage
-    localStorage.removeItem('multiplayerSession');
-    localStorage.removeItem('currentSession');
-    localStorage.removeItem('currentBingoCardId');
-    localStorage.removeItem('cartelaNumber');
-    localStorage.removeItem('cardNumber');
-    localStorage.removeItem('isHost');
-    localStorage.removeItem('bingoGameData');
-
-    // Stop all intervals
-    if (syncIntervalRef.current) {
-      clearInterval(syncIntervalRef.current);
-      syncIntervalRef.current = null;
+      
+      setIsWinner(true);
+      
+      // Speak win message
+      const winTypes = wins.map(w => w.type).join(', ');
+      const winMessage = `BINGO! ${winTypes.toUpperCase()}! Congratulations ${gameState?.user?.username || ''}!`;
+      
+      setTimeout(() => {
+        speak(winMessage);
+      }, 300);
+      
+      // Declare win to server
+      if (wins.length > 0 && multiplayerSession) {
+        const firstWin = wins[0];
+        declareWinToServer(firstWin.type, firstWin.pattern);
+      }
+      
+      return true;
     }
     
-    if (autoTimer) {
-      clearInterval(autoTimer);
-      setAutoTimer(null);
-    }
+    return false;
+  };
 
-    // Cancel any speaking
+  // ==================== UI HANDLERS ====================
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVolume = parseFloat(e.target.value);
+    setVolume(newVolume);
+    
     if (synthRef.current) {
       synthRef.current.cancel();
+      isSpeakingRef.current = false;
     }
+  };
 
-    // Redirect to game selection or lobby
-    window.location.href = '/'; // or wherever your main game lobby is
-    
-  } catch (error) {
-    console.error('Error leaving game:', error);
-    alert('Failed to leave game properly. Please try again.');
-    
-    // Force redirect even if API fails
-    window.location.href = '/';
-  }
-};
-
-  // Handle mute toggle
   const handleMuteToggle = () => {
     const newMutedState = !isMuted;
     setIsMuted(newMutedState);
@@ -1143,7 +1158,6 @@ const handleLeaveGame = async () => {
       isSpeakingRef.current = false;
     }
     
-    // On mobile, play a test sound when unmuting
     if (!newMutedState && environment === 'mobile' && isSpeechReady) {
       setTimeout(() => {
         speak("Sound enabled");
@@ -1151,7 +1165,6 @@ const handleLeaveGame = async () => {
     }
   };
 
-  // Test sound function (for mobile)
   const testSound = () => {
     if (isMuted) {
       alert("Please unmute first to test sound");
@@ -1165,49 +1178,104 @@ const handleLeaveGame = async () => {
     
     speak("Testing sound. Bingo number B five");
     
-    // Also trigger user interaction
     userInteractedRef.current = true;
     setShowMobileSoundPrompt(false);
   };
 
-  // Reset game
   const resetGame = () => {
-    setCalled([])
-    setIsWinner(false)
-    setWinDetails(null)
-    setRecentCalls(["—", "—", "—"])
-    setAutoToggle(!multiplayerSession) // Only enable auto if not multiplayer
+    setCalled([]);
+    setIsWinner(false);
+    setWinDetails(null);
+    setRecentCalls(["—", "—", "—"]);
     
-    // Reset card matrix to initial state
+    stopAutoCalling();
+    setAutoToggle(!multiplayerSession);
+    
+    if (autoTimerRef.current) {
+      clearInterval(autoTimerRef.current);
+      autoTimerRef.current = null;
+    }
+    
     if (gameState) {
-      const matrix = transformCardData(gameState.bingoCard.cardData)
-      setCardMatrix(matrix)
+      const matrix = transformCardData(gameState.bingoCard.cardData);
+      setCardMatrix(matrix);
     }
     
     if (synthRef.current) {
-      synthRef.current.cancel()
+      synthRef.current.cancel();
     }
-  }
+  };
 
-  // Helper function for ordinal suffix
-  const getOrdinalSuffix = (n: number): string => {
-    const suffixes = ['th', 'st', 'nd', 'rd']
-    const v = n % 100
-    return suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]
-  }
+  const handleLeaveGame = async () => {
+    if (!confirm('Are you sure you want to leave the game?')) return;
 
-  // Handle classic grid click
+    try {
+      if (multiplayerSession?.sessionId && gameState?.user?.id) {
+        setConnectionStatus('disconnected');
+        
+        await fetch('/api/game/leave', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          },
+          body: JSON.stringify({
+            sessionId: multiplayerSession.sessionId,
+            userId: gameState.user.id
+          })
+        });
+      }
+
+      // Clear storage
+      localStorage.removeItem('multiplayerSession');
+      localStorage.removeItem('currentSession');
+      localStorage.removeItem('currentBingoCardId');
+      localStorage.removeItem('cartelaNumber');
+      localStorage.removeItem('cardNumber');
+      localStorage.removeItem('bingoGameData');
+
+      // Cleanup
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+      if (autoCallIntervalRef.current) clearInterval(autoCallIntervalRef.current);
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+      if (synthRef.current) synthRef.current.cancel();
+
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Error leaving game:', error);
+      alert('Failed to leave game properly. Please try again.');
+      window.location.href = '/';
+    }
+  };
+
   const handleClassicGridClick = (num: number) => {
-    if (multiplayerSession && !isHost) {
-      // In multiplayer, non-host players cannot call numbers
-      console.log('Only the host can call numbers');
+    if (gameStatus !== 'playing') {
+      if (gameStatus === 'countdown') {
+        alert(`Game starts in ${countdown} seconds. Please wait!`);
+      } else {
+        alert('Waiting for game to start...');
+      }
       return;
     }
     
-    callNumber(num);
+    // EVERYONE can click and call numbers in multiplayer
+    if (!called.includes(num) && !isWinner) {
+      console.log(`👆 Player clicked number: ${num}`);
+      callNumber(num);
+    } else if (called.includes(num)) {
+      console.log(`Number ${num} already called`);
+    }
   };
 
-  // Render bingo header
+  // ==================== RENDER HELPERS ====================
+
+  const getOrdinalSuffix = (n: number): string => {
+    const suffixes = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0];
+  };
+
   const BingoHeader = () => (
     <div className="bingo-header">
       <div className="bingo-letter b">B</div>
@@ -1216,9 +1284,8 @@ const handleLeaveGame = async () => {
       <div className="bingo-letter g">G</div>
       <div className="bingo-letter o">O</div>
     </div>
-  )
+  );
 
-  // Environment badge
   const EnvironmentBadge = () => {
     if (environment === 'telegram') {
       return (
@@ -1248,7 +1315,6 @@ const handleLeaveGame = async () => {
     return null;
   };
 
-  // Speech support indicator
   const SpeechSupportIndicator = () => {
     if (!isSpeechReady && requiresUserInteraction) {
       return (
@@ -1271,7 +1337,6 @@ const handleLeaveGame = async () => {
     }
   };
 
-  // Mobile sound prompt
   const MobileSoundPrompt = () => {
     if (!showMobileSoundPrompt || environment !== 'mobile' || userInteractedRef.current) {
       return null;
@@ -1296,7 +1361,8 @@ const handleLeaveGame = async () => {
     );
   };
 
-  // Render loading state
+  // ==================== LOADING STATES ====================
+
   if (loading) {
     return (
       <div className="bingo-container flex-center">
@@ -1310,10 +1376,9 @@ const handleLeaveGame = async () => {
           )}
         </div>
       </div>
-    )
+    );
   }
 
-  // Render error state
   if (error) {
     return (
       <div className="bingo-container flex-center">
@@ -1328,10 +1393,9 @@ const handleLeaveGame = async () => {
           </button>
         </div>
       </div>
-    )
+    );
   }
 
-  // Render no game state
   if (!gameState) {
     return (
       <div className="bingo-container flex-center">
@@ -1344,18 +1408,18 @@ const handleLeaveGame = async () => {
           </a>
         </div>
       </div>
-    )
+    );
   }
+
+  // ==================== MAIN RENDER ====================
 
   return (
     <div className="bingo-container" onClick={() => {
-      // Mark user interaction on any click
       if (!userInteractedRef.current) {
         userInteractedRef.current = true;
         setShowMobileSoundPrompt(false);
       }
     }}>
-      {/* Mobile Sound Prompt */}
       <MobileSoundPrompt />
       
       {/* WIN POPUP */}
@@ -1388,7 +1452,6 @@ const handleLeaveGame = async () => {
               overflow: 'hidden'
             }}
           >
-            {/* Confetti effect background */}
             <div style={{
               position: 'absolute',
               top: 0,
@@ -1399,9 +1462,7 @@ const handleLeaveGame = async () => {
               zIndex: 1
             }} />
             
-            {/* Main content */}
             <div style={{ position: 'relative', zIndex: 2 }}>
-              {/* Winner icon */}
               <div style={{
                 fontSize: '80px',
                 marginBottom: '20px',
@@ -1411,7 +1472,6 @@ const handleLeaveGame = async () => {
                 🏆
               </div>
               
-              {/* Main title */}
               <h1 style={{
                 fontSize: '48px',
                 fontWeight: 900,
@@ -1426,7 +1486,6 @@ const handleLeaveGame = async () => {
                 BINGO!
               </h1>
               
-              {/* Congratulations with username */}
               <div style={{
                 fontSize: '28px',
                 fontWeight: 700,
@@ -1452,7 +1511,6 @@ const handleLeaveGame = async () => {
                 )}
               </div>
               
-              {/* Win details */}
               {winDetails && (
                 <div style={{
                   background: 'rgba(255,255,255,0.8)',
@@ -1462,7 +1520,7 @@ const handleLeaveGame = async () => {
                   display: 'inline-block'
                 }}>
                   <div style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
-                    {winDetails.message}
+                    {winDetails.message || `You won with ${winDetails.winType || 'BINGO'}!`}
                   </div>
                   {winDetails.position && (
                     <div style={{ fontSize: '16px', color: '#475569', marginTop: '5px' }}>
@@ -1477,7 +1535,6 @@ const handleLeaveGame = async () => {
                 </div>
               )}
               
-              {/* Cartela info */}
               {gameState?.cartela && (
                 <div style={{
                   background: 'rgba(0,0,0,0.2)',
@@ -1499,7 +1556,6 @@ const handleLeaveGame = async () => {
                 </div>
               )}
               
-              {/* Action buttons */}
               <div style={{ 
                 display: 'flex', 
                 gap: '15px', 
@@ -1508,9 +1564,9 @@ const handleLeaveGame = async () => {
               }}>
                 <button
                   onClick={() => {
-                    setIsWinner(false)
-                    setWinDetails(null)
-                    resetGame()
+                    setIsWinner(false);
+                    setWinDetails(null);
+                    resetGame();
                   }}
                   style={{
                     background: '#3b82f6',
@@ -1526,8 +1582,8 @@ const handleLeaveGame = async () => {
                     alignItems: 'center',
                     gap: '10px'
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-3px)'}
-                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-3px)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
                 >
                   <span style={{ fontSize: '20px' }}>🔄</span>
                   Play Again
@@ -1535,8 +1591,8 @@ const handleLeaveGame = async () => {
                 
                 <button
                   onClick={() => {
-                    setIsWinner(false)
-                    setWinDetails(null)
+                    setIsWinner(false);
+                    setWinDetails(null);
                   }}
                   style={{
                     background: 'rgba(255,255,255,0.3)',
@@ -1552,15 +1608,14 @@ const handleLeaveGame = async () => {
                     alignItems: 'center',
                     gap: '10px'
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.5)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.5)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.3)')}
                 >
                   <span style={{ fontSize: '20px' }}>✕</span>
                   Close
                 </button>
               </div>
               
-              {/* Celebration text */}
               <div style={{
                 marginTop: '25px',
                 fontSize: '14px',
@@ -1595,22 +1650,9 @@ const handleLeaveGame = async () => {
             zIndex: 20,
             display: 'flex',
             gap: '10px',
-            alignItems: 'center'
+            alignItems: 'center',
+            flexWrap: 'wrap'
           }}>
-            <div style={{
-              background: isHost ? 'rgba(34, 197, 94, 0.2)' : 'rgba(156, 163, 175, 0.2)',
-              padding: '4px 12px',
-              borderRadius: '20px',
-              fontSize: '12px',
-              color: isHost ? '#22c55e' : '#9ca3af',
-              border: `1px solid ${isHost ? '#22c55e' : '#9ca3af'}`,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px'
-            }}>
-              <span>{isHost ? '👑 Host' : '🎮 Player'}</span>
-            </div>
-            
             <div style={{
               background: connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.2)' : 
                           connectionStatus === 'syncing' ? 'rgba(234, 179, 8, 0.2)' : 
@@ -1639,8 +1681,206 @@ const handleLeaveGame = async () => {
                 color: '#fff',
                 border: '1px solid rgba(255,255,255,0.2)',
               }}>
-                👥 {players.length} Player{players.length !== 1 ? 's' : ''}
+                👥 {players.length}/10 Players
               </div>
+            )}
+
+            {isAutoCalling && (
+              <div style={{
+                background: 'rgba(34, 197, 94, 0.2)',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                color: '#22c55e',
+                border: '1px solid #22c55e',
+              }}>
+                🔊 Auto-calling Active
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Multiplayer Status & Countdown */}
+        {multiplayerSession && (
+          <div style={{
+            position: 'absolute',
+            top: '60px',
+            left: '10px',
+            right: '10px',
+            zIndex: 15,
+            background: 'rgba(0,0,0,0.85)',
+            padding: '15px',
+            borderRadius: '10px',
+            border: gameStatus === 'countdown' ? '2px solid #f59e0b' : 
+                     gameStatus === 'playing' ? '2px solid #22c55e' : '2px solid #3b82f6',
+            boxShadow: '0 4px 15px rgba(0,0,0,0.5)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h3 style={{ 
+                color: gameStatus === 'countdown' ? '#f59e0b' : 
+                       gameStatus === 'playing' ? '#22c55e' : '#3b82f6',
+                margin: 0
+              }}>
+                {gameStatus === 'waiting' && '🎮 Waiting for Players'}
+                {gameStatus === 'countdown' && '⏳ Game Starting Soon'}
+                {gameStatus === 'playing' && '🎯 Game in Progress'}
+                {gameStatus === 'finished' && '🏁 Game Finished'}
+              </h3>
+              
+              <div style={{
+                background: 'rgba(255,255,255,0.1)',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '14px',
+                color: '#fff'
+              }}>
+                👥 {players.length}/10 Players
+              </div>
+            </div>
+            
+            {gameStatus === 'countdown' && (
+              <div style={{
+                textAlign: 'center',
+                marginBottom: '15px',
+                padding: '10px',
+                background: 'rgba(245, 158, 11, 0.1)',
+                borderRadius: '8px'
+              }}>
+                <div style={{ fontSize: '14px', color: '#f59e0b', marginBottom: '5px' }}>
+                  Game starting in...
+                </div>
+                <div style={{
+                  fontSize: '48px',
+                  fontWeight: 'bold',
+                  color: '#f59e0b',
+                  textShadow: '0 0 10px rgba(245, 158, 11, 0.5)'
+                }}>
+                  {countdown}s
+                </div>
+                <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '5px' }}>
+                  Everyone can call numbers when game starts!
+                </div>
+              </div>
+            )}
+            
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: '8px', 
+              marginBottom: '15px',
+              maxHeight: '200px',
+              overflowY: 'auto'
+            }}>
+              {players.map(player => (
+                <div key={player.user_id} style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '8px 12px',
+                  background: 'rgba(255,255,255,0.1)',
+                  borderRadius: '6px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🎮</span>
+                    <span style={{ fontWeight: 'bold' }}>
+                      {player.username || player.first_name || 'Player'}
+                    </span>
+                    {player.user_id === gameState?.user?.id && (
+                      <span style={{ fontSize: '12px', color: '#9ca3af' }}>(You)</span>
+                    )}
+                  </div>
+                  
+                  {gameStatus === 'waiting' && (
+                    <span style={{
+                      color: playersReady[player.user_id] ? '#22c55e' : '#f59e0b',
+                      fontWeight: 'bold',
+                      fontSize: '14px'
+                    }}>
+                      {playersReady[player.user_id] ? '✅ Ready' : '⏳ Not Ready'}
+                    </span>
+                  )}
+                  
+                  {gameStatus === 'countdown' && (
+                    <span style={{ color: '#f59e0b', fontSize: '14px' }}>
+                      {playersReady[player.user_id] ? '🎮 Playing' : '⏳ Joining...'}
+                    </span>
+                  )}
+                  
+                  {gameStatus === 'playing' && (
+                    <span style={{ color: '#22c55e', fontSize: '14px' }}>
+                      🎯 In Game
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              {gameStatus !== 'playing' && 
+               gameStatus !== 'finished' && 
+               !playersReady[gameState?.user?.id || ''] && (
+                <button
+                  onClick={readyUp}
+                  style={{
+                    background: '#22c55e',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '10px 20px',
+                    color: 'white',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    flex: 1
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.02)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                >
+                  ✅ I'm Ready!
+                </button>
+              )}
+              
+              {gameStatus !== 'playing' && 
+               gameStatus !== 'finished' && 
+               playersReady[gameState?.user?.id || ''] && (
+                <div style={{
+                  background: 'rgba(34, 197, 94, 0.2)',
+                  border: '1px solid #22c55e',
+                  borderRadius: '8px',
+                  padding: '10px 20px',
+                  color: '#22c55e',
+                  fontWeight: 'bold',
+                  flex: 1,
+                  textAlign: 'center'
+                }}>
+                  ✅ You're Ready!
+                </div>
+              )}
+            </div>
+            
+            {gameStatus === 'waiting' && !playersReady[gameState?.user?.id || ''] && (
+              <p style={{ color: '#f59e0b', marginTop: '10px', fontSize: '14px', textAlign: 'center' }}>
+                Click "I'm Ready!" when you're ready to play
+              </p>
+            )}
+            
+            {gameStatus === 'waiting' && playersReady[gameState?.user?.id || ''] && (
+              <p style={{ color: '#9ca3af', marginTop: '10px', fontSize: '14px', textAlign: 'center' }}>
+                Waiting for {players.filter(p => !playersReady[p.user_id]).length} more player(s) to ready up...
+              </p>
+            )}
+            
+            {gameStatus === 'countdown' && (
+              <p style={{ color: '#f59e0b', marginTop: '10px', fontSize: '14px', textAlign: 'center' }}>
+                Game starting soon! Everyone can call numbers randomly!
+              </p>
+            )}
+            
+            {gameStatus === 'playing' && (
+              <p style={{ color: '#22c55e', marginTop: '10px', fontSize: '14px', textAlign: 'center' }}>
+                {isAutoCalling ? '🔊 Auto-calling random numbers every 3 seconds' : 'Click any number to call it!'}
+                <br />
+                <span style={{ fontSize: '12px' }}>🎲 {called.length}/75 numbers called</span>
+              </p>
             )}
           </div>
         )}
@@ -1670,7 +1910,7 @@ const handleLeaveGame = async () => {
           <div className="stat-item">
             <div>Status</div>
             <div className="stat-value" style={{ color: isWinner ? '#22c55e' : '#f59e0b' }}>
-              {isWinner ? 'BINGO!' : 'Playing'}
+              {isWinner ? 'BINGO!' : gameStatus === 'playing' ? 'Playing' : 'Waiting'}
             </div>
           </div>
         </div>
@@ -1678,7 +1918,7 @@ const handleLeaveGame = async () => {
         {/* CONTENT AREA */}
         <div className="flex-1 flex-column" style={{ gap: '10px', overflow: 'hidden', minHeight: 0 }}>
           <div className="flex-1" style={{ display: 'flex', gap: '10px', overflow: 'hidden', minHeight: 0 }}>
-            {/* LEFT PANEL - CLASSIC BOARD (75 numbers) WITH VERTICAL SCROLL */}
+            {/* LEFT PANEL - CLASSIC BOARD */}
             <div className="flex-column overflow-hidden min-width-0 flex-1">
               <BingoHeader />
               <div 
@@ -1690,12 +1930,21 @@ const handleLeaveGame = async () => {
                     key={num}
                     className={`classic-grid-item ${called.includes(num) ? 'called' : ''}`}
                     onClick={() => handleClassicGridClick(num)}
-                    title={multiplayerSession && !isHost && !called.includes(num) 
-                      ? 'Only the host can call numbers' 
-                      : `Call number ${num}`}
-                    style={multiplayerSession && !isHost && !called.includes(num) 
-                      ? { opacity: 0.5, cursor: 'not-allowed' } 
-                      : {}}
+                    title={
+                      gameStatus !== 'playing'
+                        ? gameStatus === 'countdown' 
+                          ? `Game starts in ${countdown}s` 
+                          : 'Waiting for game to start'
+                        : called.includes(num) 
+                          ? `Number ${num} already called` 
+                          : `Click to call number ${num}`
+                    }
+                    style={{
+                      opacity: gameStatus !== 'playing' ? 0.5 : 1,
+                      cursor: gameStatus !== 'playing' ? 'not-allowed' : 'pointer',
+                      backgroundColor: called.includes(num) ? '#4ade80' : '',
+                      color: called.includes(num) ? '#000' : ''
+                    }}
                   >
                     {num}
                   </div>
@@ -1718,7 +1967,6 @@ const handleLeaveGame = async () => {
                   <span style={{ fontSize: '14px', fontWeight: '500' }}>Volume:</span>
                   <SpeechSupportIndicator />
                   
-                  {/* Test sound button for mobile */}
                   {environment === 'mobile' && (
                     <button
                       onClick={testSound}
@@ -1760,7 +2008,6 @@ const handleLeaveGame = async () => {
                   </div>
                 )}
                 
-                {/* Mobile instructions */}
                 {environment === 'mobile' && requiresUserInteraction && !userInteractedRef.current && (
                   <div style={{ 
                     fontSize: '12px', 
@@ -1797,58 +2044,90 @@ const handleLeaveGame = async () => {
                 }
               </div>
 
+              {/* AUTO-CALL STATUS */}
+              {gameStatus === 'playing' && !isWinner && (
+                <div style={{
+                  textAlign: 'center',
+                  padding: '8px',
+                  background: isAutoCalling ? 'rgba(34, 197, 94, 0.1)' : 'rgba(156, 163, 175, 0.1)',
+                  borderRadius: '8px',
+                  border: isAutoCalling ? '1px solid #22c55e' : '1px solid #9ca3af',
+                  color: isAutoCalling ? '#22c55e' : '#9ca3af',
+                  fontSize: '14px',
+                  fontWeight: 'bold'
+                }}>
+                  {isAutoCalling 
+                    ? `🔊 Auto-calling random numbers every ${callInterval/1000} seconds` 
+                    : '⏸️ Auto-calling paused - click numbers to call them'}
+                </div>
+              )}
+
               {/* CONTROLS */}
-            {/* CONTROLS */}
-<div className="controls" style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-  {!multiplayerSession && (
-    <button
-      className={`control-button ${autoToggle ? 'auto-button active' : 'auto-button'}`}
-      onClick={() => setAutoToggle(!autoToggle)}
-      disabled={isWinner}
-      title={autoToggle ? 'Stop automatic number calling' : 'Start automatic number calling'}
-    >
-      {autoToggle ? '⏹️Auto' : '▶️Auto'}
-    </button>
-  )}
-  <button
-    className="control-button reset-button"
-    onClick={resetGame}
-    title="Reset the game"
-  >
-    🔄 Reset
-  </button>
-  
-  {/* Leave Game Button - Always visible */}
-  <button
-    className="control-button leave-button"
-    onClick={handleLeaveGame}
-    title={multiplayerSession ? 'Leave multiplayer game' : 'Exit to lobby'}
-    style={{
-      background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-      color: 'white',
-      border: 'none',
-      padding: '8px 16px',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      fontWeight: 'bold',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '5px',
-      transition: 'all 0.3s'
-    }}
-    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-  >
-    <span>🚪</span>
-    Leave Game
-  </button>
-</div>
+              <div className="controls" style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                {!multiplayerSession ? (
+                  <button
+                    className={`control-button ${autoToggle ? 'auto-button active' : 'auto-button'}`}
+                    onClick={() => setAutoToggle(!autoToggle)}
+                    disabled={isWinner || gameStatus !== 'playing'}
+                    title={autoToggle ? 'Stop automatic number calling' : 'Start automatic number calling'}
+                  >
+                    {autoToggle ? '⏹️ Auto' : '▶️ Auto'}
+                  </button>
+                ) : (
+                  <button
+                    className={`control-button ${isAutoCalling ? 'auto-button active' : 'auto-button'}`}
+                    onClick={() => {
+                      if (isAutoCalling) {
+                        stopAutoCalling();
+                      } else {
+                        startAutoCalling();
+                      }
+                    }}
+                    disabled={isWinner || gameStatus !== 'playing'}
+                    title={isAutoCalling ? 'Stop auto-calling' : 'Start auto-calling random numbers'}
+                  >
+                    {isAutoCalling ? '⏹️ Auto' : '▶️ Auto'}
+                  </button>
+                )}
+                
+                <button
+                  className="control-button reset-button"
+                  onClick={resetGame}
+                  title="Reset the game"
+                  disabled={gameStatus === 'playing' && !isWinner}
+                >
+                  🔄 Reset
+                </button>
+                
+                <button
+                  className="control-button leave-button"
+                  onClick={handleLeaveGame}
+                  title={multiplayerSession ? 'Leave multiplayer game' : 'Exit to lobby'}
+                  style={{
+                    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                    color: 'white',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    transition: 'all 0.3s'
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                >
+                  <span>🚪</span>
+                  Leave Game
+                </button>
+              </div>
 
               {/* BINGO CARD SECTION */}
               <div className="flex-column flex-1 min-height-0 overflow-hidden">
                 <BingoHeader />
                 
-                {/* BINGO CARD GRID */}
                 <div className="bingo-card">
                   {cardMatrix.map((row, rowIndex) => 
                     row.map((cell, colIndex) => (
@@ -1856,7 +2135,20 @@ const handleLeaveGame = async () => {
                         key={`${rowIndex}-${colIndex}`}
                         className={`bingo-cell ${cell.isMatch ? 'matched' : ''} ${cell.isWin ? 'winning' : ''}`}
                         onClick={() => cell.num && handleClassicGridClick(cell.num)}
-                        title={cell.num ? `Click to call ${cell.num}` : 'Free space'}
+                        title={
+                          cell.isMatch 
+                            ? `${cell.text} - Matched!` 
+                            : cell.isWin 
+                            ? 'Winning cell!' 
+                            : cell.text === 'FREE' 
+                            ? 'Free space' 
+                            : `Click to mark number ${cell.num}`
+                        }
+                        style={{
+                          backgroundColor: cell.isWin ? '#fbbf24' : cell.isMatch ? '#4ade80' : '',
+                          border: cell.isWin ? '3px solid #f59e0b' : '',
+                          cursor: cell.num ? 'pointer' : 'default'
+                        }}
                       >
                         {cell.text}
                       </div>
@@ -1869,5 +2161,5 @@ const handleLeaveGame = async () => {
         </div>
       </div>
     </div>
-  )
+  );
 }
