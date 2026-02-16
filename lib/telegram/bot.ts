@@ -2,7 +2,14 @@
 import 'server-only'
 import { Telegraf, Markup, Context } from 'telegraf'
 import { message } from 'telegraf/filters'
-import ngrok from '@ngrok/ngrok'
+// Remove the direct ngrok import
+// import ngrok from '@ngrok/ngrok'
+
+// Import your existing database connection
+import { db } from '@/lib/mysql-db'
+
+// We'll use dynamic import for ngrok
+let ngrok: any = null;
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
 const NGROK_AUTH_TOKEN = process.env.NGROK_AUTH_TOKEN
@@ -15,26 +22,37 @@ export const bot = new Telegraf(BOT_TOKEN)
 const commands = [
   { command: 'start', description: 'Start' },
   { command: 'register', description: 'Register' },
-  { command: 'play', description: 'play' },
-  { command: 'deposit', description: 'deposit' },
-  { command: 'balance', description: 'balance' },
-  { command: 'withdraw', description: 'withdrawal' },
-  { command: 'invite', description: 'referral' },
-  { command: 'instructions', description: 'instructions' },
-  { command: 'support', description: 'support' },
+  { command: 'play', description: 'Play' },
+  { command: 'deposit', description: 'Deposit' },
+  { command: 'balance', description: 'Balance' },
+  { command: 'withdraw', description: 'Withdrawal' },
+  { command: 'invite', description: 'Referral' },
+  { command: 'instructions', description: 'Instructions' },
+  { command: 'support', description: 'Support' },
   { command: 'about', description: 'About' },
 ]
 
 // Initialize commands
 bot.telegram.setMyCommands(commands)
 
-// Ngrok functions
+// Ngrok functions - Only used in development
 export async function startNgrokTunnel(port: number = 3000): Promise<string> {
+  // Skip ngrok in production
+  if (process.env.NODE_ENV === 'production') {
+    console.log('⚠️ Ngrok tunnel skipped in production mode')
+    return process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app'
+  }
+
   if (!NGROK_AUTH_TOKEN) {
-    throw new Error('NGROK_AUTH_TOKEN is required')
+    throw new Error('NGROK_AUTH_TOKEN is required for development tunneling')
   }
 
   try {
+    // Dynamically import ngrok only in development
+    if (!ngrok) {
+      ngrok = await import('@ngrok/ngrok')
+    }
+
     // Check for existing tunnels
     try {
       const tunnels = await ngrok.tunnels()
@@ -64,15 +82,23 @@ export async function startNgrokTunnel(port: number = 3000): Promise<string> {
     return ngrokUrl
   } catch (error) {
     console.error('❌ Ngrok tunnel failed:', error)
-    throw error
+    // Return webhook URL from env if ngrok fails
+    return process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app'
   }
 }
 
 export async function stopNgrokTunnel(): Promise<void> {
-  await ngrok.disconnect()
+  // Only try to stop ngrok in development
+  if (process.env.NODE_ENV === 'development' && ngrok) {
+    try {
+      await ngrok.disconnect()
+      console.log('✅ Ngrok tunnel stopped')
+    } catch (error) {
+      console.error('Failed to stop ngrok tunnel:', error)
+    }
+  }
   ngrokUrl = null
   botWebhookUrl = null
-  console.log('✅ Ngrok tunnel stopped')
 }
 
 export function getNgrokUrl(): string | null {
@@ -86,13 +112,14 @@ export function getBotWebhookUrl(): string | null {
 // Start command
 bot.start(async (ctx) => {
   const user = ctx.from
+  const referralCode = ctx.payload // Get referral code from start parameter
   
   await ctx.reply(
     `🎉 Welcome to Habesha Bingo, ${user.first_name}!\n\n` +
     `🎮 Play exciting bingo games\n` +
     `💰 Win real money prizes\n` +
     `🎁 Get 50 Birr welcome bonus!\n\n` +
-    `Use /register to create your account`,
+    `Use /register to create your account${referralCode ? `\n\n🔑 Referral code detected: ${referralCode}` : ''}`,
     Markup.keyboard([
       ['📋 Register', '🎮 Play'],
       ['💰 Deposit', '🏧 Withdraw'],
@@ -102,7 +129,6 @@ bot.start(async (ctx) => {
 })
 
 // Register command
-// In the /register command section, replace with:
 bot.command('register', async (ctx) => {
   const user = ctx.from
   
@@ -113,7 +139,7 @@ bot.command('register', async (ctx) => {
       [user.id.toString()]
     ) as any[]
     
-    if (existingUser.length > 0) {
+    if (existingUser && existingUser.length > 0) {
       await ctx.reply('✅ You are already registered! Use /play to start gaming.')
       return
     }
@@ -124,11 +150,11 @@ bot.command('register', async (ctx) => {
     
     while (!isUnique) {
       referralCode = `HAB${user.id.toString().slice(-6)}${Date.now().toString(36).toUpperCase()}`
-      const [checkCode] = await db.query(
+      const checkCode = await db.query(
         'SELECT id FROM users WHERE referral_code = ?',
         [referralCode]
       ) as any[]
-      isUnique = checkCode.length === 0
+      isUnique = !checkCode || checkCode.length === 0
     }
     
     // Insert user into database
@@ -152,7 +178,7 @@ bot.command('register', async (ctx) => {
       Markup.inlineKeyboard([
         Markup.button.url('📱 Share on Telegram', 
           `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${ctx.botInfo.username}?start=${referralCode}`)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}`),
-        Markup.button.webApp('🎮 Play Now', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://unrivalling-damien-overliterary.ngrok-free.dev')
+        Markup.button.webApp('🎮 Play Now', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app')
       ])
     )
     
@@ -162,22 +188,12 @@ bot.command('register', async (ctx) => {
   }
 })
 
-// 🔥 PLAY COMMAND - Opens Mini App
-// In the /play command section, REPLACE with this:
+// Play command - Opens Mini App
 bot.command('play', async (ctx) => {
   const user = ctx.from;
-  const webAppUrl = process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://unrivalling-damien-overliterary.ngrok-free.dev';
+  const webAppUrl = process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app';
   
-  // Get the user's Telegram data to pass to Mini App
-  const initData = ctx.update.message?.from 
-    ? `user=${JSON.stringify({
-        id: ctx.update.message.from.id,
-        first_name: ctx.update.message.from.first_name,
-        username: ctx.update.message.from.username,
-      })}`
-    : '';
-  
-  // Create Mini App URL with Telegram start parameter
+  // Create Mini App URL
   const miniAppUrl = `${webAppUrl}?tgWebAppStartParam=play`;
   
   await ctx.reply(
@@ -208,32 +224,50 @@ bot.command('deposit', async (ctx) => {
     '⏱️ Approval: Within 1-24 hours',
     Markup.inlineKeyboard([
       Markup.button.callback('📸 Submit Screenshot', 'submit_deposit'),
-      Markup.button.webApp('💰 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://unrivalling-damien-overliterary.ngrok-free.dev')
+      Markup.button.webApp('💰 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app')
     ])
   )
 })
 
 // Balance command
 bot.command('balance', async (ctx) => {
-  await ctx.reply(
-    '💰 Your Wallet\n\n' +
-    '💳 Main Balance: 50 Birr\n' +
-    '🎁 Bonus Balance: 10 Birr\n' +
-    '🎯 Total Balance: 60 Birr\n\n' +
-    '💸 Use /deposit to add funds\n' +
-    '🏧 Use /withdraw to cash out',
-    Markup.inlineKeyboard([
-      Markup.button.webApp('💸 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://unrivalling-damien-overliterary.ngrok-free.dev'),
-      Markup.button.webApp('🏧 Quick Withdraw', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://unrivalling-damien-overliterary.ngrok-free.dev')
-    ])
-  )
+  try {
+    // Get user balance from database
+    const users = await db.query(
+      'SELECT balance, bonus_balance FROM users WHERE telegram_id = ?',
+      [ctx.from.id.toString()]
+    ) as any[]
+    
+    if (!users || users.length === 0) {
+      await ctx.reply('❌ You are not registered. Use /register first.')
+      return
+    }
+    
+    const user = users[0]
+    
+    await ctx.reply(
+      `💰 Your Wallet\n\n` +
+      `💳 Main Balance: ${user.balance} Birr\n` +
+      `🎁 Bonus Balance: ${user.bonus_balance} Birr\n` +
+      `🎯 Total Balance: ${user.balance + user.bonus_balance} Birr\n\n` +
+      `💸 Use /deposit to add funds\n` +
+      `🏧 Use /withdraw to cash out`,
+      Markup.inlineKeyboard([
+        Markup.button.webApp('💸 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app'),
+        Markup.button.webApp('🏧 Quick Withdraw', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app')
+      ])
+    )
+  } catch (error) {
+    console.error('Balance error:', error)
+    await ctx.reply('❌ Error fetching balance. Please try again.')
+  }
 })
 
 // Withdraw command
 bot.command('withdraw', async (ctx) => {
   await ctx.reply(
     '🏧 Withdraw Funds\n\n' +
-    '💰 Available Balance: 50 Birr\n' +
+    '💰 Available Balance: Check /balance\n' +
     '📝 Minimum Withdrawal: 10 Birr\n' +
     '⏱️ Processing Time: 1-24 hours\n\n' +
     'Please send:\n' +
@@ -248,21 +282,37 @@ bot.command('withdraw', async (ctx) => {
 
 // Invite command
 bot.command('invite', async (ctx) => {
-  const referralCode = `HAB${ctx.from.id.toString().slice(-6)}REF`
-  const referralLink = `https://t.me/${ctx.botInfo.username}?start=${referralCode}`
-  
-  await ctx.reply(
-    `👥 Refer & Earn\n\n` +
-    `🎁 Earn 10 Birr for each friend who joins!\n\n` +
-    `🔑 Your Referral Code: ${referralCode}\n\n` +
-    `📱 Share this link:\n` +
-    referralLink,
-    Markup.inlineKeyboard([
-      Markup.button.url('📱 Share on Telegram', 
-        `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}`),
-      Markup.button.callback('📊 My Referrals', 'view_referrals')
-    ])
-  )
+  try {
+    // Get user's referral code from database
+    const users = await db.query(
+      'SELECT referral_code FROM users WHERE telegram_id = ?',
+      [ctx.from.id.toString()]
+    ) as any[]
+    
+    if (!users || users.length === 0) {
+      await ctx.reply('❌ You are not registered. Use /register first.')
+      return
+    }
+    
+    const referralCode = users[0].referral_code
+    const referralLink = `https://t.me/${ctx.botInfo.username}?start=${referralCode}`
+    
+    await ctx.reply(
+      `👥 Refer & Earn\n\n` +
+      `🎁 Earn 10 Birr for each friend who joins!\n\n` +
+      `🔑 Your Referral Code: ${referralCode}\n\n` +
+      `📱 Share this link:\n` +
+      referralLink,
+      Markup.inlineKeyboard([
+        Markup.button.url('📱 Share on Telegram', 
+          `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}`),
+        Markup.button.callback('📊 My Referrals', 'view_referrals')
+      ])
+    )
+  } catch (error) {
+    console.error('Invite error:', error)
+    await ctx.reply('❌ Error fetching referral info. Please try again.')
+  }
 })
 
 // Callback handlers
@@ -273,7 +323,25 @@ bot.action('submit_deposit', async (ctx) => {
 
 bot.action('view_referrals', async (ctx) => {
   await ctx.answerCbQuery()
-  await ctx.reply('📊 Referral Statistics:\n\n👥 Total Referrals: 0\n💰 Total Earned: 0 Birr')
+  try {
+    // Get referral count from database
+    const result = await db.query(
+      'SELECT COUNT(*) as count FROM users WHERE referred_by = (SELECT id FROM users WHERE telegram_id = ?)',
+      [ctx.from.id.toString()]
+    ) as any[]
+    
+    const referralCount = result && result[0]?.count || 0
+    
+    await ctx.reply(
+      `📊 Referral Statistics:\n\n` +
+      `👥 Total Referrals: ${referralCount}\n` +
+      `💰 Total Earned: ${referralCount * 10} Birr\n` +
+      `🏆 Keep referring to earn more!`
+    )
+  } catch (error) {
+    console.error('Referral stats error:', error)
+    await ctx.reply('❌ Error fetching referral statistics.')
+  }
 })
 
 // Handle photo for deposit
@@ -299,12 +367,23 @@ bot.on('text', async (ctx) => {
       return
     }
     
-    await ctx.reply(
-      `✅ Deposit Request Submitted!\n\n` +
-      `💰 Amount: ${amount} Birr\n` +
-      `⏱️ Status: Pending approval\n\n` +
-      `Admin will review within 1-24 hours.`
-    )
+    // Create deposit record in database
+    try {
+      await db.query(
+        'INSERT INTO deposits (telegram_id, amount, status, created_at) VALUES (?, ?, "pending", NOW())',
+        [ctx.from.id.toString(), amount]
+      )
+      
+      await ctx.reply(
+        `✅ Deposit Request Submitted!\n\n` +
+        `💰 Amount: ${amount} Birr\n` +
+        `⏱️ Status: Pending approval\n\n` +
+        `Admin will review within 1-24 hours.`
+      )
+    } catch (error) {
+      console.error('Deposit error:', error)
+      await ctx.reply('❌ Failed to process deposit. Please try again.')
+    }
   }
   
   // Handle withdrawal details
@@ -324,13 +403,40 @@ bot.on('text', async (ctx) => {
       return
     }
     
-    await ctx.reply(
-      `✅ Withdrawal Request Submitted!\n\n` +
-      `💰 Amount: ${amount} Birr\n` +
-      `📱 Account: ${accountNumber}\n` +
-      `⏱️ Status: Pending approval\n\n` +
-      `You'll be notified once approved.`
-    )
+    // Check if user has sufficient balance
+    try {
+      const users = await db.query(
+        'SELECT balance FROM users WHERE telegram_id = ?',
+        [ctx.from.id.toString()]
+      ) as any[]
+      
+      if (!users || users.length === 0) {
+        await ctx.reply('❌ You are not registered. Use /register first.')
+        return
+      }
+      
+      if (users[0].balance < amount) {
+        await ctx.reply('❌ Insufficient balance. Please check /balance')
+        return
+      }
+      
+      // Create withdrawal record in database
+      await db.query(
+        'INSERT INTO withdrawals (telegram_id, amount, account_number, status, created_at) VALUES (?, ?, ?, "pending", NOW())',
+        [ctx.from.id.toString(), amount, accountNumber]
+      )
+      
+      await ctx.reply(
+        `✅ Withdrawal Request Submitted!\n\n` +
+        `💰 Amount: ${amount} Birr\n` +
+        `📱 Account: ${accountNumber}\n` +
+        `⏱️ Status: Pending approval\n\n` +
+        `You'll be notified once approved.`
+      )
+    } catch (error) {
+      console.error('Withdrawal error:', error)
+      await ctx.reply('❌ Failed to process withdrawal. Please try again.')
+    }
   }
 })
 
@@ -345,9 +451,16 @@ export async function startBot() {
   try {
     console.log('🤖 Starting Habesha Bingo Bot...')
     
-    // Start ngrok tunnel
-    const tunnelUrl = await startNgrokTunnel(3000)
-    console.log(`✅ Ngrok URL: ${tunnelUrl}`)
+    // Only try ngrok in development
+    if (process.env.NODE_ENV === 'development') {
+      const tunnelUrl = await startNgrokTunnel(3000)
+      console.log(`✅ Ngrok URL: ${tunnelUrl}`)
+    } else {
+      // In production, use the production webhook URL
+      const webhookUrl = `${process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app'}/api/webhook`
+      await bot.telegram.setWebhook(webhookUrl)
+      console.log(`✅ Production webhook set to: ${webhookUrl}`)
+    }
     
     // Launch bot
     await bot.launch()
@@ -366,7 +479,9 @@ export async function startBot() {
 
 export async function stopBot() {
   await bot.stop()
-  await stopNgrokTunnel()
+  if (process.env.NODE_ENV === 'development') {
+    await stopNgrokTunnel()
+  }
   console.log('✅ Bot stopped')
 }
 
