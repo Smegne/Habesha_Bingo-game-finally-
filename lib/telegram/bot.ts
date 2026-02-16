@@ -40,7 +40,7 @@ export async function startNgrokTunnel(port: number = 3000): Promise<string> {
   // Skip ngrok in production
   if (process.env.NODE_ENV === 'production') {
     console.log('⚠️ Ngrok tunnel skipped in production mode')
-    return process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app'
+    return process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com'
   }
 
   if (!NGROK_AUTH_TOKEN) {
@@ -83,7 +83,7 @@ export async function startNgrokTunnel(port: number = 3000): Promise<string> {
   } catch (error) {
     console.error('❌ Ngrok tunnel failed:', error)
     // Return webhook URL from env if ngrok fails
-    return process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app'
+    return process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com'
   }
 }
 
@@ -178,7 +178,7 @@ bot.command('register', async (ctx) => {
       Markup.inlineKeyboard([
         Markup.button.url('📱 Share on Telegram', 
           `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${ctx.botInfo.username}?start=${referralCode}`)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}`),
-        Markup.button.webApp('🎮 Play Now', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app')
+        Markup.button.webApp('🎮 Play Now', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/')
       ])
     )
     
@@ -191,7 +191,7 @@ bot.command('register', async (ctx) => {
 // Play command - Opens Mini App
 bot.command('play', async (ctx) => {
   const user = ctx.from;
-  const webAppUrl = process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app';
+  const webAppUrl = process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/';
   
   // Create Mini App URL
   const miniAppUrl = `${webAppUrl}?tgWebAppStartParam=play`;
@@ -224,7 +224,7 @@ bot.command('deposit', async (ctx) => {
     '⏱️ Approval: Within 1-24 hours',
     Markup.inlineKeyboard([
       Markup.button.callback('📸 Submit Screenshot', 'submit_deposit'),
-      Markup.button.webApp('💰 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app')
+      Markup.button.webApp('💰 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com')
     ])
   )
 })
@@ -253,8 +253,8 @@ bot.command('balance', async (ctx) => {
       `💸 Use /deposit to add funds\n` +
       `🏧 Use /withdraw to cash out`,
       Markup.inlineKeyboard([
-        Markup.button.webApp('💸 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app'),
-        Markup.button.webApp('🏧 Quick Withdraw', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app')
+        Markup.button.webApp('💸 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com'),
+        Markup.button.webApp('🏧 Quick Withdraw', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com')
       ])
     )
   } catch (error) {
@@ -457,7 +457,7 @@ export async function startBot() {
       console.log(`✅ Ngrok URL: ${tunnelUrl}`)
     } else {
       // In production, use the production webhook URL
-      const webhookUrl = `${process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habesha-bingo.vercel.app'}/api/webhook`
+      const webhookUrl = `${process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com'}/api/webhook`
       await bot.telegram.setWebhook(webhookUrl)
       console.log(`✅ Production webhook set to: ${webhookUrl}`)
     }
