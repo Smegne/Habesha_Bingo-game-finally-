@@ -1292,11 +1292,7 @@ export default function BingoGame() {
         <div className="environment-badge telegram">
           <span className="badge-icon">📱</span>
           <span className="badge-text">Telegram</span>
-          {!isSpeechSupported && (
-            <span className="badge-warning" title="Voice features not available in Telegram WebView">
-              🔇
-            </span>
-          )}
+         
         </div>
       );
     } else if (environment === 'mobile') {
@@ -1413,556 +1409,694 @@ export default function BingoGame() {
 
   // ==================== MAIN RENDER ====================
 
-  return (
-    <div className="bingo-container" onClick={() => {
+ return (
+  <div 
+    className="bingo-game-fullscreen"
+    onClick={() => {
       if (!userInteractedRef.current) {
         userInteractedRef.current = true;
         setShowMobileSoundPrompt(false);
       }
-    }}>
-      <MobileSoundPrompt />
-      
-      {/* WIN POPUP */}
-      {isWinner && (
+    }}
+    style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      width: '100%',
+      height: '100%',
+      backgroundColor: '#0f172a',
+      background: 'linear-gradient(180deg, #2b1b3f, #0f172a)',
+      color: '#fff',
+      fontFamily: 'system-ui, sans-serif',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      padding: '10px',
+      boxSizing: 'border-box',
+    }}
+  >
+    <MobileSoundPrompt />
+    
+    {/* WIN POPUP */}
+    {isWinner && (
+      <div 
+        className="flex-center"
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.95)',
+          zIndex: 1000000
+        }}
+      >
         <div 
-          className="flex-center"
+          className="win-popup-content"
           style={{
-            position: 'fixed',
+            background: 'linear-gradient(135deg, #22c55e, #16a34a, #22c55e)',
+            color: '#000',
+            padding: '40px',
+            borderRadius: '25px',
+            textAlign: 'center',
+            maxWidth: '90%',
+            width: '500px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+            border: '8px solid rgba(255, 255, 255, 0.3)',
+            position: 'relative',
+            overflow: 'hidden'
+          }}
+        >
+          <div style={{
+            position: 'absolute',
             top: 0,
             left: 0,
             right: 0,
             bottom: 0,
-            background: 'rgba(0,0,0,0.95)',
-            zIndex: 9999
-          }}
-        >
-          <div 
-            className="win-popup-content"
-            style={{
-              background: 'linear-gradient(135deg, #22c55e, #16a34a, #22c55e)',
-              color: '#000',
-              padding: '40px',
-              borderRadius: '25px',
-              textAlign: 'center',
-              maxWidth: '90%',
-              width: '500px',
-              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
-              border: '8px solid rgba(255, 255, 255, 0.3)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
+            background: 'radial-gradient(circle at center, transparent 30%, rgba(255,255,255,0.1) 70%)',
+            zIndex: 1
+          }} />
+          
+          <div style={{ position: 'relative', zIndex: 2 }}>
             <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: 'radial-gradient(circle at center, transparent 30%, rgba(255,255,255,0.1) 70%)',
-              zIndex: 1
-            }} />
-            
-            <div style={{ position: 'relative', zIndex: 2 }}>
-              <div style={{
-                fontSize: '80px',
-                marginBottom: '20px',
-                animation: 'bounce 1s infinite alternate',
-                textShadow: '0 5px 15px rgba(0,0,0,0.3)'
-              }}>
-                🏆
-              </div>
-              
-              <h1 style={{
-                fontSize: '48px',
-                fontWeight: 900,
-                marginBottom: '10px',
-                textTransform: 'uppercase',
-                letterSpacing: '2px',
-                background: 'linear-gradient(45deg, #000, #333)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                textShadow: '2px 2px 4px rgba(0,0,0,0.2)'
-              }}>
-                BINGO!
-              </h1>
-              
-              <div style={{
-                fontSize: '28px',
-                fontWeight: 700,
-                marginBottom: '25px',
-                color: '#1e40af',
-                textShadow: '1px 1px 2px rgba(255,255,255,0.5)'
-              }}>
-                {gameState?.user?.username ? (
-                  <>
-                    CONGRATULATIONS<br />
-                    <span style={{
-                      color: '#000',
-                      display: 'block',
-                      fontSize: '32px',
-                      marginTop: '5px',
-                      textTransform: 'uppercase'
-                    }}>
-                      {gameState.user.username}!
-                    </span>
-                  </>
-                ) : (
-                  'CONGRATULATIONS!'
-                )}
-              </div>
-              
-              {winDetails && (
-                <div style={{
-                  background: 'rgba(255,255,255,0.8)',
-                  padding: '15px',
-                  borderRadius: '12px',
-                  marginBottom: '20px',
-                  display: 'inline-block'
-                }}>
-                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
-                    {winDetails.message || `You won with ${winDetails.winType || 'BINGO'}!`}
-                  </div>
-                  {winDetails.position && (
-                    <div style={{ fontSize: '16px', color: '#475569', marginTop: '5px' }}>
-                      Position: {winDetails.position}{getOrdinalSuffix(winDetails.position)}
-                    </div>
-                  )}
-                  {winDetails.prizeAmount && winDetails.prizeAmount > 0 && (
-                    <div style={{ fontSize: '20px', fontWeight: 700, color: '#f59e0b', marginTop: '5px' }}>
-                      Prize: ${winDetails.prizeAmount.toFixed(2)}
-                    </div>
-                  )}
-                </div>
-              )}
-              
-              {gameState?.cartela && (
-                <div style={{
-                  background: 'rgba(0,0,0,0.2)',
-                  padding: '15px',
-                  borderRadius: '10px',
-                  marginBottom: '25px',
-                  display: 'inline-block'
-                }}>
-                  <div style={{ fontSize: '14px', color: 'rgba(0,0,0,0.7)' }}>
-                    Winning Cartela
-                  </div>
-                  <div style={{ 
-                    fontSize: '28px', 
-                    fontWeight: 800,
-                    color: '#000'
-                  }}>
-                    #{gameState.cartela.cartelaNumber}
-                  </div>
-                </div>
-              )}
-              
-              <div style={{ 
-                display: 'flex', 
-                gap: '15px', 
-                justifyContent: 'center',
-                marginTop: '20px'
-              }}>
-                <button
-                  onClick={() => {
-                    setIsWinner(false);
-                    setWinDetails(null);
-                    resetGame();
-                  }}
-                  style={{
-                    background: '#3b82f6',
-                    border: 'none',
-                    borderRadius: '15px',
-                    padding: '15px 30px',
-                    color: '#fff',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    fontSize: '18px',
-                    transition: 'all 0.3s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px'
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-3px)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
-                >
-                  <span style={{ fontSize: '20px' }}>🔄</span>
-                  Play Again
-                </button>
-                
-                <button
-                  onClick={() => {
-                    setIsWinner(false);
-                    setWinDetails(null);
-                  }}
-                  style={{
-                    background: 'rgba(255,255,255,0.3)',
-                    border: '3px solid #000',
-                    borderRadius: '15px',
-                    padding: '15px 30px',
-                    color: '#000',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    fontSize: '18px',
-                    transition: 'all 0.3s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px'
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.5)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.3)')}
-                >
-                  <span style={{ fontSize: '20px' }}>✕</span>
-                  Close
-                </button>
-              </div>
-              
-              <div style={{
-                marginTop: '25px',
-                fontSize: '14px',
-                color: 'rgba(0,0,0,0.6)',
-                fontStyle: 'italic'
-              }}>
-                Your win has been recorded! 🎊
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MAIN LAYOUT */}
-      <div className="flex-column" style={{ height: '100%', gap: '10px', overflow: 'hidden' }}>
-        {/* Environment indicator */}
-        <div style={{
-          position: 'absolute',
-          top: '10px',
-          right: '10px',
-          zIndex: 20
-        }}>
-          <EnvironmentBadge />
-        </div>
-        
-        {/* Multiplayer Status Bar */}
-        {multiplayerSession && (
-          <div style={{
-            position: 'absolute',
-            top: '10px',
-            left: '10px',
-            zIndex: 20,
-            display: 'flex',
-            gap: '10px',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <div style={{
-              background: connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.2)' : 
-                          connectionStatus === 'syncing' ? 'rgba(234, 179, 8, 0.2)' : 
-                          'rgba(239, 68, 68, 0.2)',
-              padding: '4px 12px',
-              borderRadius: '20px',
-              fontSize: '12px',
-              color: connectionStatus === 'connected' ? '#22c55e' : 
-                     connectionStatus === 'syncing' ? '#eab308' : 
-                     '#ef4444',
-              border: `1px solid ${connectionStatus === 'connected' ? '#22c55e' : 
-                                   connectionStatus === 'syncing' ? '#eab308' : 
-                                   '#ef4444'}`,
+              fontSize: '80px',
+              marginBottom: '20px',
+              animation: 'bounce 1s infinite alternate',
+              textShadow: '0 5px 15px rgba(0,0,0,0.3)'
             }}>
-              {connectionStatus === 'connected' ? '● Connected' : 
-               connectionStatus === 'syncing' ? '⟳ Syncing' : 
-               '○ Disconnected'}
+              🏆
             </div>
-
-            {players.length > 0 && (
+            
+            <h1 style={{
+              fontSize: '48px',
+              fontWeight: 900,
+              marginBottom: '10px',
+              textTransform: 'uppercase',
+              letterSpacing: '2px',
+              background: 'linear-gradient(45deg, #000, #333)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              textShadow: '2px 2px 4px rgba(0,0,0,0.2)'
+            }}>
+              BINGO!
+            </h1>
+            
+            <div style={{
+              fontSize: '28px',
+              fontWeight: 700,
+              marginBottom: '25px',
+              color: '#1e40af',
+              textShadow: '1px 1px 2px rgba(255,255,255,0.5)'
+            }}>
+              {gameState?.user?.username ? (
+                <>
+                  CONGRATULATIONS<br />
+                  <span style={{
+                    color: '#000',
+                    display: 'block',
+                    fontSize: '32px',
+                    marginTop: '5px',
+                    textTransform: 'uppercase'
+                  }}>
+                    {gameState.user.username}!
+                  </span>
+                </>
+              ) : (
+                'CONGRATULATIONS!'
+              )}
+            </div>
+            
+            {winDetails && (
               <div style={{
-                background: 'rgba(255,255,255,0.1)',
-                padding: '4px 12px',
-                borderRadius: '20px',
-                fontSize: '12px',
-                color: '#fff',
-                border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.8)',
+                padding: '15px',
+                borderRadius: '12px',
+                marginBottom: '20px',
+                display: 'inline-block'
               }}>
-                👥 {players.length}/10 Players
+                <div style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
+                  {winDetails.message || `You won with ${winDetails.winType || 'BINGO'}!`}
+                </div>
+                {winDetails.position && (
+                  <div style={{ fontSize: '16px', color: '#475569', marginTop: '5px' }}>
+                    Position: {winDetails.position}{getOrdinalSuffix(winDetails.position)}
+                  </div>
+                )}
+                {winDetails.prizeAmount && winDetails.prizeAmount > 0 && (
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#f59e0b', marginTop: '5px' }}>
+                    Prize: ${winDetails.prizeAmount.toFixed(2)}
+                  </div>
+                )}
               </div>
             )}
-
-            {isAutoCalling && (
+            
+            {gameState?.cartela && (
               <div style={{
-                background: 'rgba(34, 197, 94, 0.2)',
-                padding: '4px 12px',
-                borderRadius: '20px',
-                fontSize: '12px',
-                color: '#22c55e',
-                border: '1px solid #22c55e',
+                background: 'rgba(0,0,0,0.2)',
+                padding: '15px',
+                borderRadius: '10px',
+                marginBottom: '25px',
+                display: 'inline-block'
               }}>
-                🔊 Auto-calling Active
+                <div style={{ fontSize: '14px', color: 'rgba(0,0,0,0.7)' }}>
+                  Winning Cartela
+                </div>
+                <div style={{ 
+                  fontSize: '28px', 
+                  fontWeight: 800,
+                  color: '#000'
+                }}>
+                  #{gameState.cartela.cartelaNumber}
+                </div>
               </div>
             )}
-          </div>
-        )}
-        
-        {/* Multiplayer Status & Countdown */}
-        
-        
-        {/* TOP STATS BAR */}
-        <div className="stats-bar">
-          <div className="stat-item">
-            <div>Cartela</div>
-            <div className="stat-value">{gameState.cartela.cartelaNumber}</div>
-          </div>
-          
-          <div className="stat-item">
-            <div>Card #</div>
-            <div className="stat-value">{gameState.bingoCard.cardNumber}</div>
-          </div>
-          
-          <div className="stat-item">
-            <div>Player</div>
-            <div className="stat-value">{gameState.user.username}</div>
-          </div>
-          
-          <div className="stat-item">
-            <div>Called</div>
-            <div className="stat-value">{called.length}/75</div>
-          </div>
-          
-          <div className="stat-item">
-            <div>Status</div>
-            <div className="stat-value" style={{ color: isWinner ? '#22c55e' : '#f59e0b' }}>
-              {isWinner ? 'BINGO!' : gameStatus === 'playing' ? 'Playing' : 'Waiting'}
-            </div>
-          </div>
-        </div>
-
-        {/* CONTENT AREA */}
-        <div className="flex-1 flex-column" style={{ gap: '10px', overflow: 'hidden', minHeight: 0 }}>
-          <div className="flex-1" style={{ display: 'flex', gap: '10px', overflow: 'hidden', minHeight: 0 }}>
-            {/* LEFT PANEL - CLASSIC BOARD */}
-            <div className="flex-column overflow-hidden min-width-0 flex-1">
-              <BingoHeader />
-              <div 
-                ref={classicGridRef}
-                className="classic-grid classic-grid-scroll"
+            
+            <div style={{ 
+              display: 'flex', 
+              gap: '15px', 
+              justifyContent: 'center',
+              marginTop: '20px'
+            }}>
+              <button
+                onClick={() => {
+                  setIsWinner(false);
+                  setWinDetails(null);
+                  resetGame();
+                }}
+                style={{
+                  background: '#3b82f6',
+                  border: 'none',
+                  borderRadius: '15px',
+                  padding: '15px 30px',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  transition: 'all 0.3s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-3px)')}
+                onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
               >
-                {Array.from({ length: 75 }, (_, i) => i + 1).map(num => (
-                  <div
-                    key={num}
-                    className={`classic-grid-item ${called.includes(num) ? 'called' : ''}`}
-                    onClick={() => handleClassicGridClick(num)}
-                    title={
-                      gameStatus !== 'playing'
-                        ? gameStatus === 'countdown' 
-                          ? `Game starts in ${countdown}s` 
-                          : 'Waiting for game to start'
-                        : called.includes(num) 
-                          ? `Number ${num} already called` 
-                          : `Click to call number ${num}`
-                    }
-                    style={{
-                      opacity: gameStatus !== 'playing' ? 0.5 : 1,
-                      cursor: gameStatus !== 'playing' ? 'not-allowed' : 'pointer',
-                      backgroundColor: called.includes(num) ? '#4ade80' : '',
-                      color: called.includes(num) ? '#000' : ''
-                    }}
-                  >
-                    {num}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* RIGHT PANEL - CONTROLS & BINGO CARD */}
-            <div className="flex-column min-width-0 flex-1 gap-10 overflow-hidden">
-              {/* VOICE CONTROLS */}
-              <div className="voice-controls">
-                <div className="flex-center" style={{ gap: '8px', marginBottom: '8px' }}>
-                  <button
-                    className={`mute-button ${isMuted ? 'muted' : ''}`}
-                    onClick={handleMuteToggle}
-                    title={isMuted ? 'Unmute sound' : 'Mute sound'}
-                  >
-                    {isMuted ? '🔇' : '🔊'}
-                  </button>
-                  <span style={{ fontSize: '14px', fontWeight: '500' }}>Volume:</span>
-                  <SpeechSupportIndicator />
-                  
-                  {environment === 'mobile' && (
-                    <button
-                      onClick={testSound}
-                      className="test-sound-button"
-                      title="Test sound"
-                    >
-                      🔊 Test
-                    </button>
-                  )}
-                </div>
-                
-                {isSpeechSupported ? (
-                  <div className="flex-center" style={{ gap: '8px' }}>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.1"
-                      value={volume}
-                      onChange={handleVolumeChange}
-                      className="volume-slider"
-                      disabled={isMuted || !isSpeechReady}
-                      title={`Volume: ${Math.round(volume * 100)}%`}
-                    />
-                    <span style={{ fontSize: '14px', fontWeight: '600', minWidth: '40px' }}>
-                      {Math.round(volume * 100)}%
-                    </span>
-                  </div>
-                ) : (
-                  <div style={{ 
-                    fontSize: '12px', 
-                    color: '#9ca3af',
-                    padding: '8px',
-                    background: 'rgba(156, 163, 175, 0.1)',
-                    borderRadius: '6px',
-                    textAlign: 'center'
-                  }}>
-                    Voice features not available in this browser
-                  </div>
-                )}
-                
-                {environment === 'mobile' && requiresUserInteraction && !userInteractedRef.current && (
-                  <div style={{ 
-                    fontSize: '12px', 
-                    color: '#fbbf24',
-                    padding: '8px',
-                    background: 'rgba(251, 191, 36, 0.1)',
-                    borderRadius: '6px',
-                    textAlign: 'center',
-                    marginTop: '8px',
-                    border: '1px solid rgba(251, 191, 36, 0.3)'
-                  }}>
-                    👆 <strong>Tap anywhere</strong> to enable game sounds
-                  </div>
-                )}
-              </div>
-
-              {/* RECENT CALLS */}
-              <div className="recent-calls">
-                {recentCalls.map((call, index) => (
-                  <div 
-                    key={index}
-                    className="recent-call-item"
-                  >
-                    {call}
-                  </div>
-                ))}
-              </div>
-
-              {/* CURRENT NUMBER DISPLAY */}
-              <div className={`current-number ${called.length > 0 ? 'active' : ''}`}>
-                {called.length > 0 
-                  ? `${getLetter(called[called.length - 1])}-${called[called.length - 1]}`
-                  : '—'
-                }
-              </div>
-
-      
+                <span style={{ fontSize: '20px' }}>🔄</span>
+                Play Again
+              </button>
               
-
-              {/* CONTROLS */}
-              <div className="controls" style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-                {!multiplayerSession ? (
-                  <button
-                    className={`control-button ${autoToggle ? 'auto-button active' : 'auto-button'}`}
-                    onClick={() => setAutoToggle(!autoToggle)}
-                    disabled={isWinner || gameStatus !== 'playing'}
-                    title={autoToggle ? 'Stop automatic number calling' : 'Start automatic number calling'}
-                  >
-                    {autoToggle ? '⏹️ Auto' : '▶️ Auto'}
-                  </button>
-                ) : (
-                  <button
-                    className={`control-button ${isAutoCalling ? 'auto-button active' : 'auto-button'}`}
-                    onClick={() => {
-                      if (isAutoCalling) {
-                        stopAutoCalling();
-                      } else {
-                        startAutoCalling();
-                      }
-                    }}
-                    disabled={isWinner || gameStatus !== 'playing'}
-                    title={isAutoCalling ? 'Stop auto-calling' : 'Start auto-calling random numbers'}
-                  >
-                    {isAutoCalling ? '⏹️ Auto' : '▶️ Auto'}
-                  </button>
-                )}
-                
-                <button
-                  className="control-button reset-button"
-                  onClick={resetGame}
-                  title="Reset the game"
-                  disabled={gameStatus === 'playing' && !isWinner}
-                >
-                  🔄 Reset
-                </button>
-                
-                <button
-                  className="control-button leave-button"
-                  onClick={handleLeaveGame}
-                  title={multiplayerSession ? 'Leave multiplayer game' : 'Exit to lobby'}
-                  style={{
-                    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-                    color: 'white',
-                    border: 'none',
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    transition: 'all 0.3s'
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                >
-                  <span>🚪</span>
-                  Leave Game
-                </button>
-              </div>
-
-              {/* BINGO CARD SECTION */}
-              <div className="flex-column flex-1 min-height-0 overflow-hidden">
-                <BingoHeader />
-                
-                <div className="bingo-card">
-                  {cardMatrix.map((row, rowIndex) => 
-                    row.map((cell, colIndex) => (
-                      <div
-                        key={`${rowIndex}-${colIndex}`}
-                        className={`bingo-cell ${cell.isMatch ? 'matched' : ''} ${cell.isWin ? 'winning' : ''}`}
-                        onClick={() => cell.num && handleClassicGridClick(cell.num)}
-                        title={
-                          cell.isMatch 
-                            ? `${cell.text} - Matched!` 
-                            : cell.isWin 
-                            ? 'Winning cell!' 
-                            : cell.text === 'FREE' 
-                            ? 'Free space' 
-                            : `Click to mark number ${cell.num}`
-                        }
-                        style={{
-                          backgroundColor: cell.isWin ? '#fbbf24' : cell.isMatch ? '#4ade80' : '',
-                          border: cell.isWin ? '3px solid #f59e0b' : '',
-                          cursor: cell.num ? 'pointer' : 'default'
-                        }}
-                      >
-                        {cell.text}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+              <button
+                onClick={() => {
+                  setIsWinner(false);
+                  setWinDetails(null);
+                }}
+                style={{
+                  background: 'rgba(255,255,255,0.3)',
+                  border: '3px solid #000',
+                  borderRadius: '15px',
+                  padding: '15px 30px',
+                  color: '#000',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  transition: 'all 0.3s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.5)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.3)')}
+              >
+                <span style={{ fontSize: '20px' }}>✕</span>
+                Close
+              </button>
+            </div>
+            
+            <div style={{
+              marginTop: '25px',
+              fontSize: '14px',
+              color: 'rgba(0,0,0,0.6)',
+              fontStyle: 'italic'
+            }}>
+              Your win has been recorded! 🎊
             </div>
           </div>
         </div>
       </div>
+    )}
+
+    {/* Environment indicator */}
+    <div style={{
+      position: 'absolute',
+      top: '10px',
+      right: '10px',
+      zIndex: 20
+    }}>
+      <EnvironmentBadge />
     </div>
-  );
+    
+    {/* Multiplayer Status Bar */}
+    {multiplayerSession && (
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        left: '10px',
+        zIndex: 20,
+        display: 'flex',
+        gap: '10px',
+        alignItems: 'center',
+        flexWrap: 'wrap'
+      }}>
+        <div style={{
+          background: connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.2)' : 
+                      connectionStatus === 'syncing' ? 'rgba(234, 179, 8, 0.2)' : 
+                      'rgba(239, 68, 68, 0.2)',
+          padding: '4px 12px',
+          borderRadius: '20px',
+          fontSize: '12px',
+          color: connectionStatus === 'connected' ? '#22c55e' : 
+                 connectionStatus === 'syncing' ? '#eab308' : 
+                 '#ef4444',
+          border: `1px solid ${connectionStatus === 'connected' ? '#22c55e' : 
+                               connectionStatus === 'syncing' ? '#eab308' : 
+                               '#ef4444'}`,
+        }}>
+          {connectionStatus === 'connected' ? '● Connected' : 
+           connectionStatus === 'syncing' ? '⟳ Syncing' : 
+           '○ Disconnected'}
+        </div>
+
+        {isAutoCalling && (
+          <div style={{
+            background: 'rgba(34, 197, 94, 0.2)',
+            padding: '4px 12px',
+            borderRadius: '20px',
+            fontSize: '12px',
+            color: '#22c55e',
+            border: '1px solid #22c55e',
+          }}>
+            🔊 Auto-calling Active
+          </div>
+        )}
+      </div>
+    )}
+    
+    {/* TOP STATS BAR */}
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(5, 1fr)',
+      gap: '8px',
+      marginBottom: '10px',
+      flexShrink: 0,
+    }}>
+      <div style={{ background: '#2490e2', borderRadius: '8px', padding: '8px', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px' }}>Cartela</div>
+        <div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '2px' }}>{gameState.cartela.cartelaNumber}</div>
+      </div>
+      <div style={{ background: '#2490e2', borderRadius: '8px', padding: '8px', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px' }}>Card #</div>
+        <div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '2px' }}>{gameState.bingoCard.cardNumber}</div>
+      </div>
+      <div style={{ background: '#2490e2', borderRadius: '8px', padding: '8px', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px' }}>Player</div>
+        <div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '2px' }}>{players.length}</div>
+      </div>
+      <div style={{ background: '#2490e2', borderRadius: '8px', padding: '8px', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px' }}>Called</div>
+        <div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '2px' }}>{called.length}/75</div>
+      </div>
+      <div style={{ background: '#2490e2', borderRadius: '8px', padding: '8px', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px' }}>Status</div>
+        <div style={{ 
+          fontWeight: 'bold', 
+          fontSize: '14px', 
+          marginTop: '2px',
+          color: isWinner ? '#22c55e' : '#f59e0b' 
+        }}>
+          {isWinner ? 'BINGO!' : gameStatus === 'playing' ? 'Playing' : 'Waiting'}
+        </div>
+      </div>
+    </div>
+
+    {/* MAIN GAME AREA - Two columns */}
+    <div style={{
+      display: 'flex',
+      gap: '10px',
+      flex: 1,
+      minHeight: 0,
+      overflow: 'hidden'
+    }}>
+      {/* LEFT COLUMN - Classic Board (75 numbers) */}
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minWidth: 0,
+        height: '100%',
+        overflow: 'hidden'
+      }}>
+        {/* BINGO Header */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(5, 1fr)',
+          gap: '2px',
+          marginBottom: '8px',
+          flexShrink: 0
+        }}>
+          {['B', 'I', 'N', 'G', 'O'].map((letter, index) => (
+            <div key={letter} style={{
+              background: index === 0 ? '#3b82f6' : 
+                         index === 1 ? '#6366f1' : 
+                         index === 2 ? '#8b5cf6' : 
+                         index === 3 ? '#22c55e' : '#f97316',
+              borderRadius: '20px',
+              height: '40px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 'bold',
+              fontSize: '20px'
+            }}>
+              {letter}
+            </div>
+          ))}
+        </div>
+
+        {/* 75 Number Grid */}
+        <div ref={classicGridRef} style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(5, 1fr)',
+          gap: '4px',
+          flex: 1,
+          overflowY: 'auto',
+          padding: '4px'
+        }}>
+          {Array.from({ length: 75 }, (_, i) => i + 1).map(num => (
+            <div
+              key={num}
+              onClick={() => handleClassicGridClick(num)}
+              style={{
+                background: called.includes(num) ? '#ec10b1' : 'rgba(255, 255, 255, 0.15)',
+                borderRadius: '50%',
+                aspectRatio: '1/1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '600',
+                cursor: gameStatus !== 'playing' ? 'not-allowed' : 'pointer',
+                opacity: gameStatus !== 'playing' ? 0.5 : 1,
+                color: called.includes(num) ? '#000' : '#fff',
+                fontSize: 'clamp(10px, 2vw, 16px)',
+                transition: 'all 0.3s'
+              }}
+              title={
+                gameStatus !== 'playing'
+                  ? gameStatus === 'countdown' 
+                    ? `Game starts in ${countdown}s` 
+                    : 'Waiting for game to start'
+                  : called.includes(num) 
+                    ? `Number ${num} already called` 
+                    : `Click to call number ${num}`
+              }
+            >
+              {num}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* RIGHT COLUMN - Controls and Bingo Card */}
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minWidth: 0,
+        gap: '10px',
+        height: '100%',
+        overflow: 'hidden'
+      }}>
+        {/* Voice Controls */}
+        <div style={{
+          background: '#1e40af',
+          borderRadius: '20px',
+          padding: '8px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexShrink: 0
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={handleMuteToggle}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: '#fff',
+                fontSize: '18px'
+              }}
+            >
+              {isMuted ? '🔇' : '🔊'}
+            </button>
+            <span style={{ fontSize: '14px', fontWeight: '500' }}>Volume:</span>
+            <SpeechSupportIndicator />
+          </div>
+          
+          {isSpeechSupported ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={volume}
+                onChange={handleVolumeChange}
+                disabled={isMuted || !isSpeechReady}
+                style={{ width: '80px' }}
+              />
+              <span style={{ fontSize: '14px', fontWeight: '600', minWidth: '40px' }}>
+                {Math.round(volume * 100)}%
+              </span>
+            </div>
+          ) : (
+            <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+              Voice not available
+            </div>
+          )}
+        </div>
+
+        {/* Recent Calls */}
+        <div style={{
+          display: 'flex',
+          gap: '4px',
+          flexShrink: 0
+        }}>
+          {recentCalls.map((call, index) => (
+            <div key={index} style={{
+              background: '#6d28d9',
+              padding: '8px 12px',
+              borderRadius: '12px',
+              fontSize: '14px',
+              flex: 1,
+              textAlign: 'center',
+              fontWeight: '600'
+            }}>
+              {call}
+            </div>
+          ))}
+        </div>
+
+        {/* Current Number Display */}
+        <div style={{
+          background: 'radial-gradient(circle, #fde047, #f59e0b)',
+          color: '#4c1d95',
+          height: '60px',
+          borderRadius: '12px',
+          fontSize: '40px',
+          fontWeight: '800',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0
+        }}>
+          {called.length > 0 
+            ? `${getLetter(called[called.length - 1])}-${called[called.length - 1]}`
+            : '—'
+          }
+        </div>
+
+        {/* Control Buttons */}
+        <div style={{
+  display: 'flex',
+  gap: '36px',
+  flexShrink: 0
+}}>
+
+  {!multiplayerSession ? (
+    <button
+      onClick={() => setAutoToggle(!autoToggle)}
+      disabled={isWinner || gameStatus !== 'playing'}
+      style={{
+        background: autoToggle ? '#dc2626' : '#22c55e',
+        border: 'none',
+        borderRadius: '6px',
+        padding: '4px 8px',
+        color: '#fff',
+        fontWeight: '600',
+        cursor: 'pointer',
+        fontSize: '12px',
+        minWidth: '50px'
+      }}
+    >
+      {autoToggle ? '⏹' : '▶'}
+    </button>
+  ) : (
+    <button
+      onClick={() => isAutoCalling ? stopAutoCalling() : startAutoCalling()}
+      disabled={isWinner || gameStatus !== 'playing'}
+      style={{
+        background: isAutoCalling ? '#dc2626' : '#22c55e',
+        border: 'none',
+        borderRadius: '6px',
+        padding: '4px 8px',
+        color: '#fff',
+        fontWeight: '600',
+        cursor: 'pointer',
+        fontSize: '12px',
+        minWidth: '50px'
+      }}
+    >
+      {isAutoCalling ? '⏹' : '▶'}
+    </button>
+  )}
+
+  <button
+    onClick={resetGame}
+    disabled={gameStatus === 'playing' && !isWinner}
+    style={{
+      background: '#3b82f6',
+      border: 'none',
+      borderRadius: '6px',
+      padding: '4px 8px',
+      color: '#fff',
+      fontWeight: '600',
+      cursor: 'pointer',
+      fontSize: '12px',
+      minWidth: '50px'
+    }}
+  >
+    🔄
+  </button>
+
+  <button
+    onClick={handleLeaveGame}
+    style={{
+      background: '#ef4444',
+      border: 'none',
+      borderRadius: '6px',
+      padding: '4px 8px',
+      color: '#fff',
+      fontWeight: '600',
+      cursor: 'pointer',
+      fontSize: '12px',
+      minWidth: '50px'
+    }}
+  >
+    🚪
+  </button>
+
+</div>
+
+
+        {/* Bingo Card Section */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+          overflow: 'hidden'
+        }}>
+          {/* BINGO Header for Card */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gap: '2px',
+            marginBottom: '8px',
+            flexShrink: 0
+          }}>
+            {['B', 'I', 'N', 'G', 'O'].map((letter, index) => (
+              <div key={letter} style={{
+                background: index === 0 ? '#3b82f6' : 
+                           index === 1 ? '#6366f1' : 
+                           index === 2 ? '#8b5cf6' : 
+                           index === 3 ? '#22c55e' : '#f97316',
+                borderRadius: '20px',
+                height: '30px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                fontSize: '16px'
+              }}>
+                {letter}
+              </div>
+            ))}
+          </div>
+
+          {/* 5x5 Bingo Card Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gridTemplateRows: 'repeat(5, 1fr)',
+            gap: '4px',
+            flex: 1,
+            overflowY: 'auto',
+            padding: '4px'
+          }}>
+            {cardMatrix.map((row, rowIndex) => 
+              row.map((cell, colIndex) => (
+                <div
+                  key={`${rowIndex}-${colIndex}`}
+                  onClick={() => cell.num && handleClassicGridClick(cell.num)}
+                  style={{
+                    background: cell.isWin ? '#fbbf24' : cell.isMatch ? '#4ade80' : '#970ae3',
+                    border: cell.isWin ? '3px solid #f59e0b' : 'none',
+                    borderRadius: '50%',
+                    aspectRatio: '1/1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: '800',
+                    color: '#fff',
+                    fontSize: 'clamp(8px, 1.5vw, 12px)',
+                    cursor: cell.num ? 'pointer' : 'default',
+                    transition: 'all 0.3s'
+                  }}
+                  title={
+                    cell.isMatch 
+                      ? `${cell.text} - Matched!` 
+                      : cell.isWin 
+                      ? 'Winning cell!' 
+                      : cell.text === 'FREE' 
+                      ? 'Free space' 
+                      : `Click to mark number ${cell.num}`
+                  }
+                >
+                  {cell.text}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 }

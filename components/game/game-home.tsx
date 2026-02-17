@@ -343,46 +343,86 @@ export function GameHome() {
           </div>
 
           {/* Card Picker Dialog */}
-          <Dialog open={showCardPicker} onOpenChange={setShowCardPicker}>
-            <DialogTrigger asChild>
-              <Button 
-                className="w-full h-12 text-base relative overflow-hidden group"
-                size="lg"
-                disabled={selectCardLoading}
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                {selectCardLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    Loading...
-                  </>
-                ) : (
-                  <>
-                    <Gamepad2 className="mr-2 h-5 w-5" />
-                    🎮 Choose Card & Play
-                  </>
-                )}
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden p-0">
-              <DialogHeader className="p-6 pb-4">
-                <DialogTitle className="text-xl flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-primary" />
-                  Select Your Bingo Card
-                </DialogTitle>
-                <DialogDescription>
-                  Choose from 400 available cards. ${selectedStake} stake required.
-                </DialogDescription>
-              </DialogHeader>
-              
-              <div className="overflow-y-auto px-6 pb-6 max-h-[calc(90vh-140px)]">
-                <CardPicker
-                  stake={selectedStake}
-                  onSelect={handleSelectCard}
-                />
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Dialog open={showCardPicker} onOpenChange={setShowCardPicker}
+          >
+  <DialogTrigger asChild>
+    <Button 
+      className="w-full h-12 text-base relative overflow-hidden group"
+      size="lg"
+      disabled={selectCardLoading}
+    >
+      <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+      {selectCardLoading ? (
+        <>
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+          Loading...
+        </>
+      ) : (
+        <>
+          <Gamepad2 className="mr-2 h-5 w-5" />
+          🎮 Choose Card & Play
+        </>
+      )}
+    </Button>
+  </DialogTrigger>
+
+  {/* FULL SCREEN EDGE-TO-EDGE DIALOG */}
+ <DialogContent
+  className="
+   
+    w-screen h-screen
+    max-w-[100vw] max-h-[100vh]
+    !top-0
+   !translate-y-0
+    rounded-none
+    p-0
+    flex flex-col
+  "
+>
+
+
+    {/* Top Gradient Accent */}
+    <div className="h-1 w-full bg-gradient-to-r from-primary via-purple-500 to-pink-500" />
+
+    {/* HEADER */}
+    <div className="flex items-center justify-between px-8 py-5 border-b bg-background/95 backdrop-blur-md sticky top-0 z-50">
+      <div>
+        <h2 className="text-2xl font-semibold flex items-center gap-2">
+          <Sparkles className="h-6 w-6 text-primary" />
+          Select Your Bingo Card
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Choose from 400 available cards • ${selectedStake} stake required
+        </p>
+      </div>
+
+      {/* Modern Close Button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => setShowCardPicker(false)}
+        className="
+          rounded-full 
+          hover:bg-destructive/10 
+          hover:text-destructive
+          transition
+        "
+      >
+        ✕
+      </Button>
+    </div>
+
+    {/* BODY CONTENT */}
+    <div className="flex-1 overflow-y-auto px-8 py-6 bg-muted/20">
+      <CardPicker
+        stake={selectedStake}
+        onSelect={handleSelectCard}
+      />
+    </div>
+  </DialogContent>
+</Dialog>
+
 
           {/* Balance Warning */}
           {user && user.balance < selectedStake && (

@@ -1338,26 +1338,7 @@ const handleCountdownStart = () => {
                   </div>
                 </div>
                 
-                {/* Game Instructions */}
-                <div className="mt-6 p-4 bg-gradient-to-r from-blue-500/10 to-cyan-500/10 rounded-2xl backdrop-blur-sm border border-blue-500/20">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0">
-                      <LightningChargeFill size={20} className="text-white" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-white mb-1">Multiplayer BINGO Rules</p>
-                      <p className="text-sm text-white/70">
-                        1. Select a cartela number from the grid<br />
-                        2. Preview your BINGO card with lucky numbers<br />
-                        3. Click "Start Multiplayer Game" to join waiting room<br />
-                        4. Wait for other players (50s countdown)<br />
-                        5. Game starts automatically with 2+ players<br />
-                        6. First to complete a BINGO pattern wins!<br />
-                        7. If no one joins, you'll get a message
-                      </p>
-                    </div>
-                  </div>
-                </div>
+               
               </div>
             </div>
             
