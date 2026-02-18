@@ -137,7 +137,7 @@ const fetchSession = async () => {
   }
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-purple-900/95 via-indigo-900/95 to-blue-900/95 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <div className=" top-4 fixed inset-0 bg-gradient-to-br from-purple-900/95 via-indigo-900/95 to-blue-900/95 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
       <div className="bg-gradient-to-br from-gray-900 to-black rounded-3xl p-8 max-w-lg w-full mx-4 border border-purple-500/30 shadow-2xl">
         {/* Header */}
         <div className="text-center mb-8">
@@ -185,11 +185,11 @@ const fetchSession = async () => {
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-xl font-semibold text-white flex items-center gap-2">
-              <PeopleFill size={20} className="text-green-400" />
+              <PeopleFill size={10} className="text-green-400" />
               Players in Lobby
             </h3>
-            <span className="px-4 py-1.5 bg-gradient-to-r from-green-600 to-emerald-600 rounded-full text-sm font-bold text-white">
-              {players.length} / 10
+            <span className="px-2 py-1.5 bg-gradient-to-r from-green-600 to-emerald-600 rounded-full text-sm font-bold text-white">
+              {players.length}=players
             </span>
           </div>
           
@@ -200,7 +200,7 @@ const fetchSession = async () => {
                 className="flex items-center gap-4 p-4 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-all"
               >
                 <div className="relative">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-lg">
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-lg">
                     {index + 1}
                   </div>
                   {player.player_status === 'ready' && (
@@ -235,7 +235,7 @@ const fetchSession = async () => {
 
         {/* Status Message */}
         {sessionStatus === 'waiting' && (
-          <div className="p-5 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-2xl border border-yellow-500/30 mb-6">
+          <div className="p-2 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-2xl border border-yellow-500/30 mb-6">
             <p className="text-yellow-300 text-center font-semibold mb-2">
               ⏳ Waiting for players to join...
             </p>

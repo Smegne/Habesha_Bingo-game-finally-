@@ -781,7 +781,7 @@ const handleCountdownStart = () => {
               </div>
             </div>
             <div className="animate-pulse">
-              <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-pink-300 mb-2">
+              <p className="text-md font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-pink-300 mb-1">
                 BINGO ROYALE
               </p>
               <p className="text-lg font-semibold text-white/80">Securing your session...</p>
@@ -818,43 +818,15 @@ const handleCountdownStart = () => {
         </div>
       )}
 
-      {/* Control Buttons */}
-      <div className="fixed bottom-6 right-6 flex flex-col gap-3 z-30">
-        <div 
-          className="relative group"
-          onClick={toggleSound}
-          title={soundEnabled ? "Mute sound" : "Unmute sound"}
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full blur opacity-0 group-hover:opacity-70 transition-opacity"></div>
-          <div className="relative w-14 h-14 bg-black/70 rounded-full flex items-center justify-center cursor-pointer border-2 border-yellow-400 shadow-xl backdrop-blur-sm">
-            {soundEnabled ? (
-              <VolumeUpFill size={26} className="text-white" />
-            ) : (
-              <VolumeMuteFill size={26} className="text-white" />
-            )}
-          </div>
-        </div>
-        
-        <div className="relative group">
-          <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full blur opacity-0 group-hover:opacity-70 transition-opacity"></div>
-          <button
-            onClick={refreshAll}
-            disabled={isLoading || showBingoGame || showCountdown}
-            className="relative w-14 h-14 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-full flex items-center justify-center hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm disabled:opacity-50"
-            title="Refresh all data"
-          >
-            <ArrowClockwise className={`text-white ${isLoading ? "animate-spin" : ""}`} size={24} />
-          </button>
-        </div>
-      </div>
+     
 
       {/* Top Action Buttons */}
       {currentUser && !showBingoGame && !showCountdown && (
-        <div className="fixed top-4 left-4 z-30 flex gap-2">
+        <div className="fixed top-2 right-4 z-300 flex gap-2">
           <button
             onClick={handleLogout}
             disabled={isLoading}
-            className="px-4 py-2.5 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-full flex items-center gap-2 hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm text-sm disabled:opacity-50"
+            className="px-2 py-2 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-full flex items-center gap-2 hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm text-sm disabled:opacity-50"
             title="Logout"
           >
             <BoxArrowRight size={16} />
@@ -880,26 +852,7 @@ const handleCountdownStart = () => {
               <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 via-pink-600/20 to-indigo-600/20 backdrop-blur-sm"></div>
               <div className="relative bg-gradient-to-r from-indigo-700/90 via-purple-700/90 to-pink-700/90 text-white rounded-3xl p-6 md:p-8 shadow-2xl border border-white/10">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                  <div className="text-center md:text-left">
-                    <div className="flex items-center justify-center md:justify-start gap-3 mb-4">
-                      <div className="relative">
-                        <TrophyFill size={36} className="text-yellow-300 animate-pulse" />
-                      </div>
-                      <h1 className="text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-yellow-300 to-pink-300">
-                        BINGO ROYALE
-                      </h1>
-                      <div className="relative">
-                        <TrophyFill size={36} className="text-yellow-300 animate-pulse" />
-                      </div>
-                    </div>
-                    
-                    <p className="text-lg opacity-90 mb-2">
-                      Select your lucky cartela and start winning!
-                    </p>
-                    <p className="text-sm opacity-70">
-                      Premium multiplayer gaming experience
-                    </p>
-                  </div>
+                 
                   
                   {/* User Info */}
                   {currentUser ? (
@@ -909,17 +862,17 @@ const handleCountdownStart = () => {
                         <div className="relative bg-black/30 backdrop-blur-sm rounded-2xl px-6 py-4 border border-white/20">
                           <div className="flex items-center gap-4">
                             <div className="relative">
-                              <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
-                                <PersonCircle size={28} className="text-white" />
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
+                                <PersonCircle size={14} className="text-white" />
                               </div>
                               {userVerification?.verified && (
                                 <div className="absolute -top-1 -right-1 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full p-1 shadow-lg">
-                                  <ShieldCheck size={14} className="text-white" />
+                                  <ShieldCheck size={10} className="text-white" />
                                 </div>
                               )}
                             </div>
                             <div className="text-left">
-                              <p className="font-bold text-xl flex items-center gap-2">
+                              <p className="font-bold text-sm flex items-center gap-2">
                                 {currentUser.firstName}
                                 {currentUser.role === 'admin' && (
                                   <span className="text-xs px-2 py-0.5 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full">
@@ -950,7 +903,7 @@ const handleCountdownStart = () => {
                   ) : (
                     <div className="flex flex-col items-center gap-4">
                       <div className="text-center">
-                        <ShieldCheck size={48} className="text-red-300 mx-auto mb-2" />
+                        <ShieldCheck size={28} className="text-red-300 mx-auto mb-2" />
                         <p className="font-bold text-xl mb-2">Authentication Required</p>
                         <p className="opacity-90">Login to access multiplayer games</p>
                       </div>
@@ -983,13 +936,13 @@ const handleCountdownStart = () => {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-white/70 mb-1">Available Cartelas</p>
-                        <p className="text-3xl font-bold text-white">
+                        <p className="text-sm font-bold text-white">
                           {cartelas.filter(c => c.is_available).length}
-                          <span className="text-sm text-white/50"> / {cartelas.length}</span>
+                          <span className="text-sm text-white/50"> </span>
                         </p>
                       </div>
                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center">
-                        <Grid3x3GapFill size={24} className="text-white" />
+                        
                       </div>
                     </div>
                   </div>
@@ -997,13 +950,13 @@ const handleCountdownStart = () => {
                   <div className="bg-gradient-to-br from-blue-600/20 to-cyan-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-white/70 mb-1">Your Balance</p>
-                        <p className="text-3xl font-bold text-white">
-                          ${currentUser.balance?.toFixed(2)}
+                        <p className="text-sm text-white/70 mb-1">Balance</p>
+                        <p className="text-sm font-bold text-white">
+                          {currentUser.balance?.toFixed(2)}
                         </p>
                       </div>
                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 flex items-center justify-center">
-                        <Coin size={24} className="text-white" />
+                        
                       </div>
                     </div>
                   </div>
@@ -1011,13 +964,13 @@ const handleCountdownStart = () => {
                   <div className="bg-gradient-to-br from-green-600/20 to-emerald-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-white/70 mb-1">Bonus Balance</p>
-                        <p className="text-3xl font-bold text-white">
-                          ${currentUser.bonusBalance?.toFixed(2) || '0.00'}
+                        <p className="text-sm text-white/70 mb-1">Bonus</p>
+                        <p className="text-sm font-bold text-white">
+                          ETB {currentUser.bonusBalance?.toFixed(2) || '0.00'}
                         </p>
                       </div>
                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 flex items-center justify-center">
-                        <GiftFill size={24} className="text-white" />
+                        
                       </div>
                     </div>
                   </div>
@@ -1026,12 +979,12 @@ const handleCountdownStart = () => {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-white/70 mb-1">Selected Cartela</p>
-                        <p className="text-3xl font-bold text-white">
+                        <p className="text-sm font-bold text-white">
                           {selectedCartela?.cartela_number || '--'}
                         </p>
                       </div>
                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
-                        <TrophyFill size={24} className="text-white" />
+                        
                       </div>
                     </div>
                   </div>
@@ -1046,7 +999,7 @@ const handleCountdownStart = () => {
                 {/* Controls Header */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                   <div>
-                    <h2 className="text-2xl font-bold text-white mb-2">Available Cartelas</h2>
+                    <h2 className="text-2xl font-bold text-white mb-2"></h2>
                     <div className="flex items-center gap-3">
                       <span className="text-sm text-white/70">
                         {filteredCartelas.filter(c => c.is_available).length} available
@@ -1061,48 +1014,24 @@ const handleCountdownStart = () => {
                     </div>
                   </div>
                   
-                  {/* View Toggle */}
-                  <div className="flex items-center gap-2">
-                    <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-full p-1">
-                      <button
-                        onClick={() => setViewMode('grid')}
-                        className={`px-4 py-2 rounded-full transition-all ${
-                          viewMode === 'grid' 
-                            ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg' 
-                            : 'text-white/70 hover:text-white'
-                        }`}
-                      >
-                        Grid
-                      </button>
-                      <button
-                        onClick={() => setViewMode('compact')}
-                        className={`px-4 py-2 rounded-full transition-all ${
-                          viewMode === 'compact' 
-                            ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg' 
-                            : 'text-white/70 hover:text-white'
-                        }`}
-                      >
-                        Compact
-                      </button>
-                    </div>
-                  </div>
+                
                 </div>
                 
                 {/* Filters */}
                 {showFilters && (
-                  <div className="mb-6 p-4 bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-2xl backdrop-blur-sm border border-white/10">
+                  <div className="mb-4 p-2 bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-2xl backdrop-blur-sm border border-white/10">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {/* Search */}
                       <div className="relative">
-                        <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
-                          <Search size={20} className="text-white/50" />
+                        <div className="absolute left-1 top-1/2 transform -translate-y-1/2">
+                          <Search size={10} className="text-white/50" />
                         </div>
                         <input
                           type="text"
                           value={searchTerm}
                           onChange={(e) => setSearchTerm(e.target.value)}
                           placeholder="Search cartela number..."
-                          className="w-full pl-10 pr-10 py-3 bg-black/30 backdrop-blur-sm rounded-xl border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all"
+                          className="w-full text-sm pl-6 pr-6 py-2 bg-black/30 backdrop-blur-sm rounded-xl border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all"
                         />
                         {searchTerm && (
                           <button
@@ -1119,7 +1048,7 @@ const handleCountdownStart = () => {
                         <select
                           value={sortBy}
                           onChange={(e) => setSortBy(e.target.value as 'number' | 'availability')}
-                          className="flex-1 px-4 py-3 bg-black/30 backdrop-blur-sm rounded-xl border border-white/20 text-white focus:outline-none focus:border-purple-500 transition-all"
+                          className="w-22 text-sm px-2 py-2 bg-black/30 backdrop-blur-sm rounded-xl border border-white/20 text-white focus:outline-none focus:border-purple-500 transition-all"
                         >
                           <option value="number">Sort by Number</option>
                           <option value="availability">Sort by Availability</option>
@@ -1145,7 +1074,7 @@ const handleCountdownStart = () => {
                   viewMode === 'compact' 
                     ? 'grid-cols-8 md:grid-cols-10 lg:grid-cols-12' 
                     : 'grid-cols-6 md:grid-cols-8 lg:grid-cols-10'
-                } max-h-[400px] overflow-y-auto p-3 bg-gradient-to-br from-black/20 to-black/10 rounded-2xl`}>
+                } max-h-[400px] overflow-y-auto p-2 bg-gradient-to-br from-black/20 to-black/10 rounded-2xl`}>
                   {filteredCartelas.length === 0 ? (
                     <div className="col-span-full text-center py-10">
                       <Search size={48} className="text-white/30 mx-auto mb-4" />
@@ -1155,9 +1084,10 @@ const handleCountdownStart = () => {
                     filteredCartelas.map((cartela) => (
                       <div
                         key={cartela.id}
-                        className={`relative group ${viewMode === 'compact' ? 'h-10' : 'h-12'}`}
+                        className={`relative group ${viewMode === 'compact' ? 'h-6' : 'h-6' } ring-2 ring-green-400 ring-offset-2 ring-offset-black/50`}
                         onClick={() => cartela.is_available && handleCartelaSelect(cartela)}
                       >
+
                         <div className={`absolute inset-0 rounded-lg transition-all duration-300 ${
                           cartela.is_available
                             ? 'bg-gradient-to-br from-blue-500/20 to-purple-500/20 group-hover:from-blue-500/30 group-hover:to-purple-500/30'
@@ -1176,7 +1106,7 @@ const handleCountdownStart = () => {
                           </span>
                           
                           {!cartela.is_available && (
-                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center">
+                            <div className="absolute -top-1 -right-1 w-12 h-12 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center">
                               <XCircle size={10} className="text-white" />
                             </div>
                           )}
@@ -1198,16 +1128,14 @@ const handleCountdownStart = () => {
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center animate-pulse">
-                            <AwardFill size={20} className="text-white" />
+                          <div className="w-6 h-6 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center animate-pulse">
+                            <AwardFill size={6} className="text-white" />
                           </div>
                           <div>
-                            <p className="text-lg font-bold text-white">
-                              Selected Cartela: <span className="text-2xl text-yellow-300">{selectedCartela.cartela_number}</span>
+                            <p className="text-sm font-bold text-white">
+                              Selected: <span className="text-xl text-yellow-300">{selectedCartela.cartela_number}</span>
                             </p>
-                            <p className="text-green-300 text-sm">
-                              Ready to start as <span className="font-semibold">{currentUser?.firstName}</span>
-                            </p>
+                            
                           </div>
                         </div>
                       </div>
@@ -1215,14 +1143,14 @@ const handleCountdownStart = () => {
                       <div className="flex gap-3">
                         <button
                           onClick={() => setSelectedCartela(null)}
-                          className="px-5 py-2.5 bg-gradient-to-r from-red-500/20 to-pink-500/20 text-white rounded-xl hover:bg-red-500/30 transition-all backdrop-blur-sm border border-red-500/20 flex items-center gap-2"
+                          className="px-1 py-1 bg-gradient-to-r from-red-500/20 to-pink-500/20 text-white rounded-sm hover:bg-red-500/30 transition-all backdrop-blur-sm border border-red-500/20 flex items-center gap-2"
                         >
-                          <XCircle size={16} /> Clear
+                          <XCircle size={10} /> Clear
                         </button>
                         <button
                           onClick={startMultiplayerGame}
                           disabled={isLoading}
-                          className="px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold rounded-xl hover:shadow-2xl hover:scale-105 transition-all disabled:opacity-50 backdrop-blur-sm flex items-center gap-2"
+                          className="px-2 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold rounded-xl hover:shadow-2xl hover:scale-105 transition-all disabled:opacity-50 backdrop-blur-sm flex items-center gap-2"
                         >
                           {isLoading ? (
                             <>
@@ -1231,8 +1159,8 @@ const handleCountdownStart = () => {
                             </>
                           ) : (
                             <>
-                              <PlayCircle size={20} /> 
-                              <span className="hidden md:inline">Start Multiplayer Game</span>
+                              <PlayCircle size={15} /> 
+                              <span className="hidden md:inline">Start</span>
                               <span className="md:hidden">Play Now</span>
                             </>
                           )}
@@ -1244,32 +1172,32 @@ const handleCountdownStart = () => {
               </div>
               
               {/* Right Column - BINGO Card Preview */}
-              <div className="bg-gradient-to-br from-yellow-500/10 via-orange-500/10 to-red-500/10 backdrop-blur-sm rounded-3xl shadow-2xl p-5 md:p-6 border border-yellow-500/20">
+              <div className="bg-gradient-to-br from-black-500/10 via-green-500/10 to-green-500/10 backdrop-blur-sm rounded-xl shadow-2xl p-5 md:p-6 border border-yellow-500/20">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center">
-                      <CardChecklist size={24} className="text-white" />
+                    <div className="w-6 h-6 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center">
+                      <CardChecklist size={14} className="text-white" />
                     </div>
                     <div>
-                      <h3 className="text-2xl font-bold text-white">BINGO Card Preview</h3>
-                      <p className="text-sm text-white/70">Your lucky numbers are here!</p>
+                      <h3 className="text-sm font-bold text-white">BINGO Card Preview</h3>
+                      
                     </div>
                   </div>
                   
                   {selectedCartela && (
-                    <div className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full font-bold text-white shadow-lg">
+                    <div className="px-2 py-2 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full font-bold text-white shadow-lg">
                       Cartela #{selectedCartela.cartela_number}
                     </div>
                   )}
                 </div>
                 
-                <div className="mb-6">
+                <div className="mb-4">
                   {/* BINGO Letters Header */}
-                  <div className="grid grid-cols-5 gap-3 mb-4">
+                  <div className="grid grid-cols-5  mb-2">
                     {['B', 'I', 'N', 'G', 'O'].map((letter, index) => (
                       <div 
                         key={letter}
-                        className="aspect-square bg-gradient-to-br from-purple-700 to-pink-700 rounded-xl flex items-center justify-center text-white text-xl md:text-2xl font-bold shadow-lg relative overflow-hidden group"
+                        className="aspect-square bg-gradient-to-br from-purple-700 to-pink-700 rounded-xl flex items-center justify-center text-white text-sm md:text-sm font-bold shadow-sm relative overflow-hidden group"
                       >
                         <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         <span className="relative">{letter}</span>
@@ -1284,10 +1212,10 @@ const handleCountdownStart = () => {
                       <div className="col-span-5 flex items-center justify-center">
                         <div className="text-center">
                           <div className="relative">
-                            <div className="w-16 h-16 mx-auto mb-4">
+                            <div className="w-6 h-6 mx-auto mb-4">
                               <div className="absolute inset-0 animate-ping rounded-full bg-gradient-to-r from-yellow-400 to-orange-500 opacity-20"></div>
                               <div className="relative w-16 h-16 rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 flex items-center justify-center">
-                                <LightningChargeFill size={32} className="text-white animate-pulse" />
+                                <LightningChargeFill size={12} className="text-white animate-pulse" />
                               </div>
                             </div>
                             <p className="text-white/80">Generating your lucky card...</p>
@@ -1314,7 +1242,7 @@ const handleCountdownStart = () => {
                             {cellNumber}
                             {index === 12 && (
                               <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-xs text-center px-2">FREE</span>
+                                <span className="text-xs text-center px-2"></span>
                               </div>
                             )}
                           </div>
@@ -1347,14 +1275,14 @@ const handleCountdownStart = () => {
               <div className="mt-6 md:mt-8 p-4 md:p-5 bg-gradient-to-r from-green-500/10 to-emerald-500/10 backdrop-blur-sm rounded-2xl border border-green-500/20">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center">
-                      <ShieldCheck size={20} className="text-white" />
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center">
+                      <ShieldCheck size={10} className="text-white" />
                     </div>
                     <div>
-                      <p className="font-bold text-white">Secure Session Active</p>
+                    
                       <p className="text-sm text-green-300">
                         Playing as: {currentUser.firstName} • 
-                        Verified via: {userVerification?.source?.replace(/_/g, ' ') || 'Premium Auth'}
+                        
                       </p>
                     </div>
                   </div>
@@ -1366,7 +1294,7 @@ const handleCountdownStart = () => {
                       onClick={handleLogout}
                       className="px-4 py-2 text-sm bg-gradient-to-r from-red-500/20 to-pink-500/20 text-white rounded-full hover:bg-red-500/30 transition-all"
                     >
-                      Logout Session
+                      Logout
                     </button>
                   </div>
                 </div>
