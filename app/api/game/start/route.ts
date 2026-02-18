@@ -1,4 +1,4 @@
-// app/api/game/start/route.ts - Fixed version
+// app/api/game/start/route.ts - Updated with waiting state handling
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/mysql-db';
 
@@ -17,27 +17,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check cartela availability
-    const cartelaCheck = await db.query(
-      'SELECT id, cartela_number FROM cartela_card WHERE id = ? AND is_available = TRUE',
-      [cartelaId]
-    ) as any[];
-
-    if (!cartelaCheck || cartelaCheck.length === 0) {
-      return NextResponse.json(
-        { success: false, message: 'Cartela is no longer available' },
-        { status: 409 }
-      );
-    }
-
-    const cartela = cartelaCheck[0];
-
     // Start transaction
     const result = await db.transaction(async (tx) => {
       try {
-        // 1. Mark cartela as unavailable
+        // Check cartela status - should be waiting and owned by this user OR available
+        const cartelaCheck = await tx.query(
+          `SELECT id, cartela_number, status, waiting_user_id 
+           FROM cartela_card 
+           WHERE id = ? AND (status = 'waiting' OR status = 'available')`,
+          [cartelaId]
+        ) as any[];
+
+        if (!cartelaCheck || cartelaCheck.length === 0) {
+          throw new Error('Cartela not found');
+        }
+
+        const cartela = cartelaCheck[0];
+
+        // If cartela is waiting but owned by someone else, prevent use
+        if (cartela.status === 'waiting' && cartela.waiting_user_id !== userId) {
+          throw new Error('This cartela is already selected by another user');
+        }
+
+        // 1. Mark cartela as in_game
         await tx.execute(
-          'UPDATE cartela_card SET is_available = FALSE WHERE id = ?',
+          'UPDATE cartela_card SET status = "in_game", is_available = FALSE WHERE id = ?',
           [cartelaId]
         );
 
@@ -60,7 +64,16 @@ export async function POST(request: NextRequest) {
         const bingoCardId = insertResult.insertId;
 
         // 4. Create or join session
-        const sessionResult = await createOrJoinSession(tx, userId, bingoCardId);
+        const sessionResult = await createOrJoinSession(tx, userId, bingoCardId, cartelaId);
+        
+        // 5. Log to waiting history if it was waiting
+        if (cartela.status === 'waiting') {
+          await tx.execute(
+            `INSERT INTO cartela_waiting_history (cartela_id, user_id, session_id, status)
+             VALUES (?, ?, ?, 'joined_game')`,
+            [cartelaId, userId, sessionResult.session.id]
+          );
+        }
         
         return {
           success: true,
@@ -87,7 +100,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function createOrJoinSession(tx: any, userId: string, bingoCardId: number) {
+async function createOrJoinSession(tx: any, userId: string, bingoCardId: number, cartelaId: number) {
   try {
     // Check for existing waiting session
     const sessionsResult = await tx.query(`
@@ -104,7 +117,6 @@ async function createOrJoinSession(tx: any, userId: string, bingoCardId: number)
 
     let sessionId, sessionCode, isNewSession = false;
 
-    // Safely check if sessions exist
     if (sessionsResult && sessionsResult.length > 0 && sessionsResult[0]) {
       sessionId = sessionsResult[0].id;
       sessionCode = sessionsResult[0].session_code;
@@ -116,7 +128,6 @@ async function createOrJoinSession(tx: any, userId: string, bingoCardId: number)
         [sessionCode]
       ) as any;
       
-      // Check if insertResult has insertId
       if (!sessionInsertResult || !sessionInsertResult.insertId) {
         throw new Error('Failed to create new session');
       }
@@ -129,12 +140,18 @@ async function createOrJoinSession(tx: any, userId: string, bingoCardId: number)
       throw new Error('Failed to create or find session');
     }
 
+    // Remove any previous waiting entries for this user
+    await tx.execute(
+      `DELETE FROM game_players_queue WHERE user_id = ? AND status = 'waiting'`,
+      [userId]
+    );
+
     // Add player to queue
     await tx.execute(
-      `INSERT INTO game_players_queue (session_id, user_id, bingo_card_id, status, joined_at)
-       VALUES (?, ?, ?, 'waiting', NOW())
-       ON DUPLICATE KEY UPDATE status = 'waiting', left_at = NULL`,
-      [sessionId, userId, bingoCardId]
+      `INSERT INTO game_players_queue (session_id, user_id, bingo_card_id, cartela_id, status, joined_at)
+       VALUES (?, ?, ?, ?, 'waiting', NOW())
+       ON DUPLICATE KEY UPDATE status = 'waiting', left_at = NULL, cartela_id = VALUES(cartela_id)`,
+      [sessionId, userId, bingoCardId, cartelaId]
     );
 
     // Update bingo card with session id
@@ -145,7 +162,7 @@ async function createOrJoinSession(tx: any, userId: string, bingoCardId: number)
 
     // Get player count
     const countResult = await tx.query(
-      'SELECT COUNT(*) as count FROM game_players_queue WHERE session_id = ? AND status IN ("waiting", "ready")',
+      'SELECT COUNT(*) as count FROM game_players_queue WHERE session_id = ? AND status IN ("waiting", "ready", "playing")',
       [sessionId]
     ) as any[];
     

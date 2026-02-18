@@ -1,5 +1,0 @@
-export * from "./auth.api"
-export * from "./game.api"
-export * from "./wallet.api"
-export * from "./admin.api"
-export * from "./profile.api"

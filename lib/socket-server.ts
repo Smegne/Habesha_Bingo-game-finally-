@@ -16,7 +16,7 @@ export function setupSocketServer(server: any) {
     cors: {
       origin: process.env.NODE_ENV === 'production' 
         ? process.env.WEBAPP_URL 
-        : 'http://localhost:3000',
+        : 'https://habeshabingo.devvoltz.com',
       credentials: true,
     },
   });

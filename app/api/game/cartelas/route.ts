@@ -1,4 +1,4 @@
-// app/api/game/cartelas/route.ts
+// app/api/game/cartelas/route.ts - UPDATED VERSION WITH WAITING STATE
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/mysql-db';
 
@@ -7,22 +7,56 @@ interface Cartela {
   id: number;
   cartela_number: string;
   is_available: boolean;
+  status?: 'available' | 'waiting' | 'in_game';
+  waiting_user_id?: string | null;
+  waiting_expires_at?: string | null;
 }
 
 export async function GET() {
   try {
-    console.log('GET /api/game/cartelas - Fetching available cartelas');
+    console.log('GET /api/game/cartelas - Fetching cartelas with waiting state');
     
-    // Fetch available cartelas using db.query
-    const cartelas = await db.query(
-      'SELECT id, cartela_number, is_available FROM cartela_card WHERE is_available = TRUE ORDER BY cartela_number'
+    // Release any expired waiting cartelas first
+    await db.execute(
+      `UPDATE cartela_card 
+       SET status = 'available', 
+           waiting_user_id = NULL, 
+           waiting_session_id = NULL,
+           waiting_expires_at = NULL
+       WHERE status = 'waiting' 
+         AND waiting_expires_at < NOW()`
     );
+    
+    // Fetch cartelas with their current status
+    const cartelas = await db.query(`
+      SELECT 
+        cc.id, 
+        cc.cartela_number, 
+        CASE 
+          WHEN cc.status = 'available' THEN TRUE 
+          ELSE FALSE 
+        END as is_available,
+        cc.status,
+        cc.waiting_user_id,
+        cc.waiting_session_id,
+        cc.waiting_expires_at,
+        CASE 
+          WHEN cc.status = 'waiting' AND cc.waiting_expires_at IS NOT NULL 
+          THEN TIMESTAMPDIFF(SECOND, NOW(), cc.waiting_expires_at) 
+          ELSE NULL 
+        END as waiting_seconds_remaining,
+        u.username as waiting_username
+      FROM cartela_card cc
+      LEFT JOIN users u ON cc.waiting_user_id = u.id
+      ORDER BY cc.cartela_number
+    `);
     
     console.log('GET /api/game/cartelas - Success:', { count: cartelas.length });
     
     return NextResponse.json({
       success: true,
-      cartelas: cartelas as Cartela[]
+      cartelas: cartelas as Cartela[],
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('GET /api/game/cartelas - Error:', error);
@@ -40,24 +74,47 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     console.log('POST /api/game/cartelas - Request body:', body);
     
-    const { cartelaId, userId, generatePreview, saveGame, cardData } = body;
+    const { cartelaId, userId, generatePreview, saveGame, cardData, action } = body;
 
     // Validate required fields
     if (!cartelaId) {
-      console.log('POST /api/game/cartelas - Missing cartelaId');
       return NextResponse.json(
         { success: false, message: 'Cartela ID is required' },
         { status: 400 }
       );
     }
 
+    // Handle waiting state actions
+    if (action === 'select_for_waiting') {
+      if (!userId) {
+        return NextResponse.json(
+          { success: false, message: 'User ID is required to select cartela' },
+          { status: 400 }
+        );
+      }
+
+      return await handleSelectForWaiting(cartelaId, userId);
+    }
+
+    if (action === 'release_waiting') {
+      if (!userId) {
+        return NextResponse.json(
+          { success: false, message: 'User ID is required to release cartela' },
+          { status: 400 }
+        );
+      }
+
+      return await handleReleaseWaiting(cartelaId, userId);
+    }
+
     // For preview only - generate card data
     if (generatePreview) {
       console.log('POST /api/game/cartelas - Generating preview for cartelaId:', cartelaId);
       
-      // Check if cartela exists and is available
+      // Check if cartela exists and is available or waiting
       const cartelaArray = await db.query(
-        'SELECT id, cartela_number, is_available FROM cartela_card WHERE id = ?',
+        `SELECT id, cartela_number, status, waiting_user_id 
+         FROM cartela_card WHERE id = ?`,
         [cartelaId]
       ) as Cartela[];
 
@@ -69,6 +126,15 @@ export async function POST(request: NextRequest) {
       }
 
       const cartela = cartelaArray[0];
+      
+      // Check if cartela is available or waiting (for preview, we can still generate)
+      if (cartela.status === 'in_game') {
+        return NextResponse.json(
+          { success: false, message: 'Cartela is already in an active game' },
+          { status: 409 }
+        );
+      }
+
       const previewCardData = generateBingoCardData(cartela.cartela_number);
       
       console.log('POST /api/game/cartelas - Preview generated successfully');
@@ -76,129 +142,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         cardData: previewCardData,
+        cartelaStatus: cartela.status,
+        waitingUserId: cartela.waiting_user_id,
         message: 'Bingo card generated successfully'
       });
     }
 
-    // Save game data
+    // Save game data (when game actually starts)
     if (saveGame && userId && cardData) {
-      console.log('POST /api/game/cartelas - Saving game data:', {
-        cartelaId,
-        userId,
-        cardDataNumbers: cardData.numbers?.length
-      });
-
-      // Validate UUID format
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (!uuidRegex.test(userId)) {
-        console.log('POST /api/game/cartelas - Invalid userId format:', userId);
-        return NextResponse.json(
-          { success: false, message: 'Invalid user ID format' },
-          { status: 400 }
-        );
-      }
-
-      try {
-        // Use transaction for atomic operations
-        const result = await db.transaction(async (tx) => {
-          console.log('POST /api/game/cartelas - Starting transaction');
-          
-          // 1. Check cartela availability - FIXED: Use 'id' instead of 'cartela_id'
-          const cartelaCheck = await tx.query(
-            'SELECT id, cartela_number FROM cartela_card WHERE id = ? AND is_available = TRUE',
-            [cartelaId]
-          ) as Cartela[];
-
-          if (cartelaCheck.length === 0) {
-            throw new Error('Cartela is no longer available');
-          }
-
-          const cartela = cartelaCheck[0];
-          console.log('POST /api/game/cartelas - Cartela found:', cartela.cartela_number);
-
-          // 2. Update cartela as unavailable
-          const [updateResult] = await tx.execute(
-            'UPDATE cartela_card SET is_available = FALSE WHERE id = ?',
-            [cartelaId]
-          ) as any;
-
-          console.log('POST /api/game/cartelas - Cartela updated, affected rows:', updateResult.affectedRows);
-
-          // 3. Get next card number for this cartela
-          const [lastCard] = await tx.query(
-            'SELECT MAX(card_number) as last_number FROM bingo_cards WHERE cartela_id = ?',
-            [cartelaId]
-          ) as any[];
-
-          const lastNumber = lastCard[0]?.last_number || 0;
-          const nextCardNumber = lastNumber + 1;
-          console.log('POST /api/game/cartelas - Next card number:', nextCardNumber);
-
-          // 4. Save bingo card to database
-          const [insertResult] = await tx.execute(
-            `INSERT INTO bingo_cards 
-             (cartela_id, user_id, card_data, card_number, created_at) 
-             VALUES (?, ?, ?, ?, NOW())`,
-            [
-              cartelaId,
-              userId,
-              JSON.stringify(cardData),
-              nextCardNumber
-            ]
-          ) as any;
-
-          const bingoCardId = insertResult.insertId;
-          console.log('POST /api/game/cartelas - Bingo card saved, ID:', bingoCardId);
-
-          // 5. Create game session (optional - might be done in sessions route)
-          await tx.execute(
-            `INSERT INTO game_sessions 
-             (session_code, status, created_at) 
-             VALUES (?, 'waiting', NOW())`,
-            [`BINGO-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`]
-          );
-
-          console.log('POST /api/game/cartelas - Game session placeholder created');
-
-          // Prepare response data
-          return {
-            gameId: bingoCardId,
-            cardNumber: nextCardNumber,
-            gameState: {
-              gameId: bingoCardId,
-              cartelaNumber: cartela.cartela_number,
-              cardNumber: nextCardNumber,
-              numbers: cardData.numbers,
-              userId: userId,
-              createdAt: new Date().toISOString()
-            },
-            cardData: cardData
-          };
-        });
-
-        console.log('POST /api/game/cartelas - Transaction completed successfully');
-        
-        return NextResponse.json({
-          success: true,
-          gameId: result.gameId,
-          cardNumber: result.cardNumber,
-          gameState: result.gameState,
-          cardData: result.cardData,
-          message: 'Game started successfully'
-        });
-
-      } catch (transactionError: any) {
-        console.error('POST /api/game/cartelas - Transaction failed:', transactionError);
-        
-        if (transactionError.message === 'Cartela is no longer available') {
-          return NextResponse.json(
-            { success: false, message: 'Cartela is no longer available' },
-            { status: 409 }
-          );
-        }
-        
-        throw transactionError;
-      }
+      return await handleSaveGame(cartelaId, userId, cardData);
     }
 
     console.log('POST /api/game/cartelas - Invalid parameters');
@@ -217,7 +169,259 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Helper function to generate BINGO card data
+// Handle selecting a cartela for waiting
+async function handleSelectForWaiting(cartelaId: number, userId: string) {
+  try {
+    const result = await db.transaction(async (tx) => {
+      // Check if cartela is available (not waiting and not in game)
+      const cartelaCheck = await tx.query(
+        `SELECT id, cartela_number, status, waiting_user_id 
+         FROM cartela_card 
+         WHERE id = ?`,
+        [cartelaId]
+      ) as any[];
+
+      if (cartelaCheck.length === 0) {
+        throw new Error('Cartela not found');
+      }
+
+      const cartela = cartelaCheck[0];
+
+      // If cartela is waiting, check if it's expired
+      if (cartela.status === 'waiting') {
+        // Release expired waiting cartelas
+        await tx.execute(
+          `UPDATE cartela_card 
+           SET status = 'available', 
+               waiting_user_id = NULL, 
+               waiting_session_id = NULL,
+               waiting_expires_at = NULL
+           WHERE status = 'waiting' 
+             AND waiting_expires_at < NOW()`
+        );
+
+        // Recheck after cleanup
+        const refreshedCheck = await tx.query(
+          `SELECT status FROM cartela_card WHERE id = ?`,
+          [cartelaId]
+        ) as any[];
+
+        if (refreshedCheck[0]?.status !== 'available') {
+          throw new Error('Cartela is already selected by another user');
+        }
+      } else if (cartela.status !== 'available') {
+        throw new Error('Cartela is not available');
+      }
+
+      // Check if user already has a waiting cartela
+      const userWaiting = await tx.query(
+        `SELECT id FROM cartela_card 
+         WHERE waiting_user_id = ? AND status = 'waiting'`,
+        [userId]
+      ) as any[];
+
+      if (userWaiting.length > 0) {
+        // Release the user's previous waiting cartela
+        await tx.execute(
+          `UPDATE cartela_card 
+           SET status = 'available', 
+               waiting_user_id = NULL, 
+               waiting_session_id = NULL,
+               waiting_expires_at = NULL
+           WHERE waiting_user_id = ? AND status = 'waiting'`,
+          [userId]
+        );
+
+        // Log cancellation
+        await tx.execute(
+          `INSERT INTO cartela_waiting_history (cartela_id, user_id, status)
+           VALUES (?, ?, 'cancelled')`,
+          [userWaiting[0].id, userId]
+        );
+      }
+
+      // Set this cartela as waiting (expires in 5 minutes)
+      await tx.execute(
+        `UPDATE cartela_card 
+         SET status = 'waiting', 
+             waiting_user_id = ?,
+             waiting_expires_at = DATE_ADD(NOW(), INTERVAL 5 MINUTE)
+         WHERE id = ?`,
+        [userId, cartelaId]
+      );
+
+      // Log selection
+      await tx.execute(
+        `INSERT INTO cartela_waiting_history (cartela_id, user_id, status)
+         VALUES (?, ?, 'selected')`,
+        [cartelaId, userId]
+      );
+
+      return { 
+        success: true,
+        expiresIn: 300, // 5 minutes in seconds
+        message: 'Cartela selected successfully'
+      };
+    });
+
+    return NextResponse.json(result);
+
+  } catch (error: any) {
+    console.error('Error in handleSelectForWaiting:', error);
+    return NextResponse.json(
+      { success: false, message: error.message || 'Failed to select cartela' },
+      { status: 500 }
+    );
+  }
+}
+
+// Handle releasing a waiting cartela
+async function handleReleaseWaiting(cartelaId: number, userId: string) {
+  try {
+    const result = await db.transaction(async (tx) => {
+      // Verify user owns this waiting cartela
+      const cartela = await tx.query(
+        `SELECT id FROM cartela_card 
+         WHERE id = ? AND waiting_user_id = ? AND status = 'waiting'`,
+        [cartelaId, userId]
+      ) as any[];
+
+      if (cartela.length === 0) {
+        throw new Error('Cartela not found or you do not have permission');
+      }
+
+      // Release the cartela
+      await tx.execute(
+        `UPDATE cartela_card 
+         SET status = 'available', 
+             waiting_user_id = NULL, 
+             waiting_session_id = NULL,
+             waiting_expires_at = NULL
+         WHERE id = ?`,
+        [cartelaId]
+      );
+
+      // Log cancellation
+      await tx.execute(
+        `INSERT INTO cartela_waiting_history (cartela_id, user_id, status)
+         VALUES (?, ?, 'cancelled')`,
+        [cartelaId, userId]
+      );
+
+      return { success: true };
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: 'Cartela released successfully'
+    });
+
+  } catch (error: any) {
+    console.error('Error in handleReleaseWaiting:', error);
+    return NextResponse.json(
+      { success: false, message: error.message || 'Failed to release cartela' },
+      { status: 500 }
+    );
+  }
+}
+
+// Handle saving game (when game actually starts)
+async function handleSaveGame(cartelaId: number, userId: string, cardData: any) {
+  try {
+    const result = await db.transaction(async (tx) => {
+      // Check cartela status - should be waiting and owned by this user
+      const cartelaCheck = await tx.query(
+        `SELECT id, cartela_number, status, waiting_user_id 
+         FROM cartela_card 
+         WHERE id = ? AND (status = 'waiting' OR status = 'available')`,
+        [cartelaId]
+      ) as any[];
+
+      if (cartelaCheck.length === 0) {
+        throw new Error('Cartela not found');
+      }
+
+      const cartela = cartelaCheck[0];
+
+      // If cartela is waiting but owned by someone else, prevent use
+      if (cartela.status === 'waiting' && cartela.waiting_user_id !== userId) {
+        throw new Error('This cartela is already selected by another user');
+      }
+
+      // Update cartela to in_game
+      await tx.execute(
+        `UPDATE cartela_card 
+         SET status = 'in_game', 
+             is_available = FALSE
+         WHERE id = ?`,
+        [cartelaId]
+      );
+
+      // Get next card number
+      const [lastCard] = await tx.query(
+        'SELECT MAX(card_number) as last_number FROM bingo_cards WHERE cartela_id = ?',
+        [cartelaId]
+      ) as any[];
+
+      const lastNumber = lastCard[0]?.last_number || 0;
+      const nextCardNumber = lastNumber + 1;
+
+      // Save bingo card
+      const [insertResult] = await tx.execute(
+        `INSERT INTO bingo_cards 
+         (cartela_id, user_id, card_data, card_number, created_at) 
+         VALUES (?, ?, ?, ?, NOW())`,
+        [
+          cartelaId,
+          userId,
+          JSON.stringify(cardData),
+          nextCardNumber
+        ]
+      ) as any;
+
+      const bingoCardId = insertResult.insertId;
+
+      // Log to history
+      await tx.execute(
+        `INSERT INTO cartela_waiting_history (cartela_id, user_id, status)
+         VALUES (?, ?, 'joined_game')`,
+        [cartelaId, userId]
+      );
+
+      return {
+        gameId: bingoCardId,
+        cardNumber: nextCardNumber,
+        gameState: {
+          gameId: bingoCardId,
+          cartelaNumber: cartela.cartela_number,
+          cardNumber: nextCardNumber,
+          numbers: cardData.numbers,
+          userId: userId,
+          createdAt: new Date().toISOString()
+        },
+        cardData: cardData
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      gameId: result.gameId,
+      cardNumber: result.cardNumber,
+      gameState: result.gameState,
+      cardData: result.cardData,
+      message: 'Game started successfully'
+    });
+
+  } catch (error: any) {
+    console.error('Error in handleSaveGame:', error);
+    return NextResponse.json(
+      { success: false, message: error.message || 'Failed to start game' },
+      { status: 500 }
+    );
+  }
+}
+
+// Helper function to generate BINGO card data (unchanged)
 function generateBingoCardData(cartelaNumber: string) {
   console.log('Generating BINGO card data for cartela:', cartelaNumber);
   

@@ -1,4 +1,4 @@
-// components/game/card-picker.tsx - UPDATED VERSION
+// components/game/card-picker.tsx - COMPLETE UPDATED VERSION WITH WAITING STATE
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -40,7 +40,10 @@ interface Cartela {
   id: number;
   cartela_number: string;
   is_available: boolean;
+  status?: 'available' | 'waiting' | 'in_game';
   popularity?: number;
+  waiting_user_id?: string | null;
+  waiting_expires_at?: string | null;
 }
 
 interface User {
@@ -65,6 +68,15 @@ interface GameSession {
   createdAt: string;
 }
 
+interface WaitingCartela {
+  userId: string;
+  username?: string;
+  firstName?: string;
+  expiresAt: string;
+  sessionId?: number;
+  expiresInSeconds: number;
+}
+
 interface CardPickerProps {
   onGameStart?: (gameData: any) => void;
 }
@@ -84,6 +96,12 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   const [selectedCartela, setSelectedCartela] = useState<Cartela | null>(null);
   const [bingoCardNumbers, setBingoCardNumbers] = useState<(number | string)[]>([]);
   const [generatedCardData, setGeneratedCardData] = useState<any>(null);
+  
+  // Waiting cartela states
+  const [waitingCartelas, setWaitingCartelas] = useState<{[key: number]: WaitingCartela}>({});
+  const [myWaitingCartela, setMyWaitingCartela] = useState<Cartela | null>(null);
+  const [waitingExpiryTime, setWaitingExpiryTime] = useState<number | null>(null);
+  const [waitingExpiryInterval, setWaitingExpiryInterval] = useState<NodeJS.Timeout | null>(null);
   
   // UI states
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -118,6 +136,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   const selectSoundRef = useRef<HTMLAudioElement | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const winnerPollingRef = useRef<NodeJS.Timeout | null>(null);
+  const waitingPollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize and fetch data
   useEffect(() => {
@@ -141,11 +160,14 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     // Fetch initial data
     checkAuthAndLoadData();
     fetchCartelas();
+    startWaitingCartelaPolling();
 
     // Cleanup on unmount
     return () => {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
       if (winnerPollingRef.current) clearInterval(winnerPollingRef.current);
+      if (waitingPollingRef.current) clearInterval(waitingPollingRef.current);
+      if (waitingExpiryInterval) clearInterval(waitingExpiryInterval);
     };
   }, []);
 
@@ -200,15 +222,51 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         const numB = parseInt(b.cartela_number);
         return sortOrder === 'asc' ? numA - numB : numB - numA;
       } else {
-        // Sort by availability (available first)
-        if (a.is_available === b.is_available) return 0;
-        if (a.is_available) return sortOrder === 'asc' ? -1 : 1;
-        return sortOrder === 'asc' ? 1 : -1;
+        // Sort by availability (available first, then waiting, then in_game)
+        const getStatusPriority = (status?: string) => {
+          if (status === 'available') return 0;
+          if (status === 'waiting') return 1;
+          return 2;
+        };
+        const priorityA = getStatusPriority(a.status);
+        const priorityB = getStatusPriority(b.status);
+        return sortOrder === 'asc' ? priorityA - priorityB : priorityB - priorityA;
       }
     });
     
     setFilteredCartelas(result);
   }, [cartelas, searchTerm, sortBy, sortOrder]);
+
+  // Update expiry countdown
+  useEffect(() => {
+    if (myWaitingCartela && waitingExpiryTime !== null) {
+      if (waitingExpiryInterval) {
+        clearInterval(waitingExpiryInterval);
+      }
+
+      const interval = setInterval(() => {
+        setWaitingExpiryTime(prev => {
+          if (prev && prev > 0) {
+            return prev - 1;
+          } else {
+            // Expired
+            setMyWaitingCartela(null);
+            setSelectedCartela(null);
+            setBingoCardNumbers([]);
+            setGeneratedCardData(null);
+            clearInterval(interval);
+            return null;
+          }
+        });
+      }, 1000);
+
+      setWaitingExpiryInterval(interval);
+
+      return () => {
+        if (interval) clearInterval(interval);
+      };
+    }
+  }, [myWaitingCartela]);
 
   const checkAuthAndLoadData = async () => {
     setUserLoading(true);
@@ -322,6 +380,59 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     }
   };
 
+  const startWaitingCartelaPolling = useCallback(() => {
+    if (waitingPollingRef.current) {
+      clearInterval(waitingPollingRef.current);
+    }
+
+    const pollWaitingCartelas = async () => {
+      try {
+        const response = await fetch('/api/game/cartelas/waiting');
+        const data = await response.json();
+        
+        if (data.success) {
+          const waitingMap: {[key: number]: WaitingCartela} = {};
+          data.waitingCartelas.forEach((w: any) => {
+            waitingMap[w.id] = {
+              userId: w.waiting_user_id,
+              username: w.waiting_username || w.waiting_first_name,
+              firstName: w.waiting_first_name,
+              expiresAt: w.waiting_expires_at,
+              sessionId: w.waiting_session_id,
+              expiresInSeconds: w.expires_in_seconds
+            };
+          });
+          setWaitingCartelas(waitingMap);
+          
+          // Check if my waiting cartela is still valid
+          if (myWaitingCartela && currentUser) {
+            const myWaiting = waitingMap[myWaitingCartela.id];
+            if (!myWaiting || myWaiting.userId !== currentUser.id) {
+              // My waiting cartela was released or taken by someone else
+              setMyWaitingCartela(null);
+              setWaitingExpiryTime(null);
+              setSelectedCartela(null);
+              setBingoCardNumbers([]);
+              setGeneratedCardData(null);
+              alert('Your cartela selection has expired or been released');
+            } else {
+              // Update expiry time
+              setWaitingExpiryTime(myWaiting.expiresInSeconds);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error polling waiting cartelas:', error);
+      }
+    };
+
+    // Poll immediately
+    pollWaitingCartelas();
+
+    // Then poll every 2 seconds
+    waitingPollingRef.current = setInterval(pollWaitingCartelas, 2000);
+  }, [myWaitingCartela, currentUser]);
+
   const playSound = useCallback((soundType: 'click' | 'confirm' | 'select' = 'click') => {
     if (!soundEnabled) return;
     try {
@@ -347,9 +458,16 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   }, []);
 
   const handleCartelaSelect = async (cartela: Cartela) => {
-    if (!cartela.is_available) {
+    // Check if cartela is taken by someone else waiting
+    if (waitingCartelas[cartela.id] && waitingCartelas[cartela.id].userId !== currentUser?.id) {
       playSound('click');
-      alert(`Cartela ${cartela.cartela_number} is already taken`);
+      alert(`Cartela ${cartela.cartela_number} is already selected by ${waitingCartelas[cartela.id].username || 'another user'}`);
+      return;
+    }
+    
+    if (!cartela.is_available && cartela.status !== 'waiting') {
+      playSound('click');
+      alert(`Cartela ${cartela.cartela_number} is already in a game`);
       return;
     }
     
@@ -360,246 +478,306 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     }
     
     playSound('select');
-    setSelectedCartela(cartela);
     setIsLoading(true);
     
     try {
-      const token = localStorage.getItem('token');
-      
-      const response = await fetch('/api/game/cartelas', {
+      // First, select the cartela for waiting
+      const selectResponse = await fetch('/api/game/cartelas', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cartelaId: cartela.id,
-          generatePreview: true,
-          userId: currentUser.id
+          userId: currentUser.id,
+          action: 'select_for_waiting'
         })
       });
       
-      const data = await response.json();
+      const selectData = await selectResponse.json();
       
-      if (data.success) {
-        const numbers = data.cardData.numbers.map((item: any) => item.number);
+      if (!selectData.success) {
+        alert(selectData.message || 'Failed to select cartela');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Then generate preview
+      const previewResponse = await fetch('/api/game/cartelas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cartelaId: cartela.id,
+          userId: currentUser.id,
+          generatePreview: true
+        })
+      });
+      
+      const previewData = await previewResponse.json();
+      
+      if (previewData.success) {
+        const numbers = previewData.cardData.numbers.map((item: any) => item.number);
         setBingoCardNumbers(numbers);
-        setGeneratedCardData(data.cardData);
+        setGeneratedCardData(previewData.cardData);
+        setSelectedCartela(cartela);
+        setMyWaitingCartela(cartela);
+        setWaitingExpiryTime(selectData.expiresIn || 300);
+        
+        // Refresh cartelas to show updated status
+        fetchCartelas();
       } else {
-        alert(data.message || 'Failed to generate preview');
+        alert(previewData.message || 'Failed to generate preview');
       }
     } catch (error) {
-      console.error('Error generating card:', error);
-      alert('Error generating preview card');
+      console.error('Error selecting cartela:', error);
+      alert('Error selecting cartela');
     } finally {
       setIsLoading(false);
     }
   };
 
-
-// In card-picker.tsx - Enhanced error handling
-const startMultiplayerGame = async () => {
-  if (!selectedCartela || !generatedCardData || !currentUser) {
-    alert('Please select a cartela and login first');
-    return;
-  }
-  
-  setIsLoading(true);
-  playSound('confirm');
-  
-  try {
-    console.log('Starting game with:', {
-      cartelaId: selectedCartela.id,
-      userId: currentUser.id,
-      cardData: generatedCardData
-    });
+  const releaseCartela = async () => {
+    if (!selectedCartela || !currentUser) return;
     
-    const response = await fetch('/api/game/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        cartelaId: selectedCartela.id,
-        userId: currentUser.id,
-        cardData: generatedCardData
-      })
-    });
-    
-    // Log raw response for debugging
-    console.log('Response status:', response.status);
-    
-    const data = await response.json();
-    console.log('Response data:', data);
-    
-    if (!response.ok) {
-      throw new Error(data.message || `HTTP error! status: ${response.status}`);
-    }
-    
-    if (!data.success) {
-      throw new Error(data.message || 'Failed to start game');
-    }
-    
-    // Validate response structure
-    if (!data.session) {
-      console.error('Invalid response structure:', data);
-      throw new Error('Invalid response from server: missing session data');
-    }
-    
-    // Save session info
-    localStorage.setItem('currentSession', JSON.stringify(data.session));
-    localStorage.setItem('currentBingoCardId', data.bingoCardId.toString());
-    if (data.cartelaNumber) {
-      localStorage.setItem('cartelaNumber', data.cartelaNumber);
-    }
-    if (data.cardNumber) {
-      localStorage.setItem('cardNumber', data.cardNumber.toString());
-    }
-    
-    // Set session state and show countdown
-    setGameSession(data.session);
-    setShowCountdown(true);
-    
-    // Start polling for session updates
-    startSessionPolling(data.session.code, currentUser.id);
-    
-  } catch (error: any) {
-    console.error('Failed to start multiplayer game:', error);
-    
-    // Show more detailed error message
-    let errorMessage = error.message || 'Failed to start game';
-    
-    // Check for specific error types
-    if (error.message.includes('not iterable')) {
-      errorMessage = 'Server returned invalid data format. Please try again.';
-    }
-    
-    alert(errorMessage);
-    setIsLoading(false);
-  }
-};
-
-  // Polling function for session updates
-const startSessionPolling = (sessionCode: string, userId: string) => {
-  if (pollingIntervalRef.current) {
-    clearInterval(pollingIntervalRef.current);
-    pollingIntervalRef.current = null;
-  }
-  
-  let consecutiveErrors = 0;
-  const MAX_CONSECUTIVE_ERRORS = 3;
-  
-  pollingIntervalRef.current = setInterval(async () => {
+    setIsLoading(true);
     try {
-      // Use the sessions endpoint (not current)
-      const response = await fetch(`/api/game/sessions?code=${sessionCode}&userId=${userId}`);
+      const response = await fetch('/api/game/cartelas/waiting?' + new URLSearchParams({
+        cartelaId: selectedCartela.id.toString(),
+        userId: currentUser.id
+      }), {
+        method: 'DELETE'
+      });
+      
       const data = await response.json();
       
       if (data.success) {
-        consecutiveErrors = 0;
-        const session = data.session;
-        const players = data.players;
+        setSelectedCartela(null);
+        setBingoCardNumbers([]);
+        setGeneratedCardData(null);
+        setMyWaitingCartela(null);
+        setWaitingExpiryTime(null);
+        playSound('click');
         
-        // Update session state
-        setGameSession({
-          id: session.id,
-          code: session.code,
-          status: session.status,
-          countdownRemaining: session.countdownRemaining,
-          playerCount: session.playerCount,
-          createdAt: session.createdAt
-        });
-        
-        // Check if we have 2+ players and session is waiting
-        if (session.playerCount >= 2 && session.status === 'waiting') {
-          console.log('✅ Two players detected, forcing countdown start');
-          setGameSession(prev => prev ? {
-            ...prev,
-            status: 'countdown',
-            countdownRemaining: 50
-          } : null);
-        }
-        
-        // Handle session state changes
-        if (session.status === 'cancelled') {
-          stopPolling();
-          setShowCountdown(false);
-          setGameSession(null);
-          setIsLoading(false);
-          localStorage.removeItem('currentSession');
-          alert('No other players joined yet. Please try again.');
-        }
-        
-        if (session.status === 'active' || session.shouldStartGame) {
-          console.log('🎮 Game is starting!');
-          stopPolling();
-          setShowCountdown(false);
-          startBingoGame(sessionCode, userId);
-        }
+        // Refresh cartelas to show updated status
+        fetchCartelas();
       } else {
-        consecutiveErrors++;
-        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          console.error('Too many polling errors, stopping...');
-          stopPolling();
-        }
+        alert(data.message || 'Failed to release cartela');
       }
     } catch (error) {
-      console.error('Polling error:', error);
-      consecutiveErrors++;
-      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-        stopPolling();
-      }
-    }
-  }, 1500);
-};
-  // Start bingo game with multiplayer data
-const startBingoGame = async (sessionCode: string, userId: string) => {
-  try {
-    // Fetch current session data
-    const response = await fetch(`/api/game/sessions?code=${sessionCode}&userId=${userId}`);
-    const data = await response.json();
-    
-    if (data.success && data.session) {
-      // Get stored data
-      const bingoCardId = localStorage.getItem('currentBingoCardId');
-      const cartelaNumber = localStorage.getItem('cartelaNumber');
-      
-      const gameData = {
-        sessionId: data.session.id,
-        sessionCode: sessionCode,
-        isMultiplayer: true,
-        gameMode: 'multiplayer',
-        startTime: new Date().toISOString(),
-        playerCount: data.session.playerCount,
-        players: data.players || [],
-        bingoCardId: bingoCardId,
-        cartelaNumber: cartelaNumber,
-        // Include the card data that was generated earlier
-        cardData: generatedCardData
-      };
-      
-      localStorage.setItem('bingoGameData', JSON.stringify(gameData));
-      localStorage.setItem('multiplayerSession', JSON.stringify({
-        code: sessionCode,
-        userId: userId,
-        sessionId: data.session.id
-      }));
-      
-      setBingoGameData(gameData);
-      setShowBingoGame(true);
-      setIsLoading(false);
-      
-      // Start winner detection polling
-      startWinnerPolling(sessionCode, userId);
-    } else {
-      console.error('Failed to get session data:', data);
+      console.error('Error releasing cartela:', error);
+      alert('Error releasing cartela');
+    } finally {
       setIsLoading(false);
     }
-  } catch (error) {
-    console.error('Failed to start bingo game:', error);
-    setIsLoading(false);
-  }
-};
+  };
 
-  // Poll for winner announcements
+  const startMultiplayerGame = async () => {
+    if (!selectedCartela || !generatedCardData || !currentUser) {
+      alert('Please select a cartela and login first');
+      return;
+    }
+    
+    // Verify cartela is still waiting for us
+    if (waitingCartelas[selectedCartela.id]?.userId !== currentUser.id) {
+      alert('Your cartela selection has expired. Please select again.');
+      setSelectedCartela(null);
+      setMyWaitingCartela(null);
+      return;
+    }
+    
+    setIsLoading(true);
+    playSound('confirm');
+    
+    try {
+      console.log('Starting game with:', {
+        cartelaId: selectedCartela.id,
+        userId: currentUser.id,
+        cardData: generatedCardData
+      });
+      
+      const response = await fetch('/api/game/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cartelaId: selectedCartela.id,
+          userId: currentUser.id,
+          cardData: generatedCardData
+        })
+      });
+      
+      console.log('Response status:', response.status);
+      
+      const data = await response.json();
+      console.log('Response data:', data);
+      
+      if (!response.ok) {
+        throw new Error(data.message || `HTTP error! status: ${response.status}`);
+      }
+      
+      if (!data.success) {
+        throw new Error(data.message || 'Failed to start game');
+      }
+      
+      if (!data.session) {
+        console.error('Invalid response structure:', data);
+        throw new Error('Invalid response from server: missing session data');
+      }
+      
+      // Save session info
+      localStorage.setItem('currentSession', JSON.stringify(data.session));
+      localStorage.setItem('currentBingoCardId', data.bingoCardId.toString());
+      if (data.cartelaNumber) {
+        localStorage.setItem('cartelaNumber', data.cartelaNumber);
+      }
+      if (data.cardNumber) {
+        localStorage.setItem('cardNumber', data.cardNumber.toString());
+      }
+      
+      // Clear waiting state
+      setMyWaitingCartela(null);
+      setWaitingExpiryTime(null);
+      
+      // Set session state and show countdown
+      setGameSession(data.session);
+      setShowCountdown(true);
+      
+      // Refresh cartelas to show updated status
+      fetchCartelas();
+      
+      // Start polling for session updates
+      startSessionPolling(data.session.code, currentUser.id);
+      
+    } catch (error: any) {
+      console.error('Failed to start multiplayer game:', error);
+      
+      let errorMessage = error.message || 'Failed to start game';
+      
+      if (error.message.includes('not iterable')) {
+        errorMessage = 'Server returned invalid data format. Please try again.';
+      }
+      
+      alert(errorMessage);
+      setIsLoading(false);
+    }
+  };
+
+  const startSessionPolling = (sessionCode: string, userId: string) => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 3;
+    
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/game/sessions?code=${sessionCode}&userId=${userId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+          consecutiveErrors = 0;
+          const session = data.session;
+          const players = data.players;
+          
+          // Update session state
+          setGameSession({
+            id: session.id,
+            code: session.code,
+            status: session.status,
+            countdownRemaining: session.countdownRemaining,
+            playerCount: session.playerCount,
+            createdAt: session.createdAt
+          });
+          
+          // Check if we have 2+ players and session is waiting
+          if (session.playerCount >= 2 && session.status === 'waiting') {
+            console.log('✅ Two players detected, forcing countdown start');
+            setGameSession(prev => prev ? {
+              ...prev,
+              status: 'countdown',
+              countdownRemaining: 50
+            } : null);
+          }
+          
+          // Handle session state changes
+          if (session.status === 'cancelled') {
+            stopPolling();
+            setShowCountdown(false);
+            setGameSession(null);
+            setIsLoading(false);
+            localStorage.removeItem('currentSession');
+            alert('No other players joined yet. Please try again.');
+          }
+          
+          if (session.status === 'active' || session.shouldStartGame) {
+            console.log('🎮 Game is starting!');
+            stopPolling();
+            setShowCountdown(false);
+            startBingoGame(sessionCode, userId);
+          }
+        } else {
+          consecutiveErrors++;
+          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+            console.error('Too many polling errors, stopping...');
+            stopPolling();
+          }
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+        consecutiveErrors++;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          stopPolling();
+        }
+      }
+    }, 1500);
+  };
+
+  const startBingoGame = async (sessionCode: string, userId: string) => {
+    try {
+      // Fetch current session data
+      const response = await fetch(`/api/game/sessions?code=${sessionCode}&userId=${userId}`);
+      const data = await response.json();
+      
+      if (data.success && data.session) {
+        // Get stored data
+        const bingoCardId = localStorage.getItem('currentBingoCardId');
+        const cartelaNumber = localStorage.getItem('cartelaNumber');
+        
+        const gameData = {
+          sessionId: data.session.id,
+          sessionCode: sessionCode,
+          isMultiplayer: true,
+          gameMode: 'multiplayer',
+          startTime: new Date().toISOString(),
+          playerCount: data.session.playerCount,
+          players: data.players || [],
+          bingoCardId: bingoCardId,
+          cartelaNumber: cartelaNumber,
+          cardData: generatedCardData
+        };
+        
+        localStorage.setItem('bingoGameData', JSON.stringify(gameData));
+        localStorage.setItem('multiplayerSession', JSON.stringify({
+          code: sessionCode,
+          userId: userId,
+          sessionId: data.session.id
+        }));
+        
+        setBingoGameData(gameData);
+        setShowBingoGame(true);
+        setIsLoading(false);
+        
+        // Start winner detection polling
+        startWinnerPolling(sessionCode, userId);
+      } else {
+        console.error('Failed to get session data:', data);
+        setIsLoading(false);
+      }
+    } catch (error) {
+      console.error('Failed to start bingo game:', error);
+      setIsLoading(false);
+    }
+  };
+
   const startWinnerPolling = (sessionCode: string, userId: string) => {
     if (winnerPollingRef.current) {
       clearInterval(winnerPollingRef.current);
@@ -613,24 +791,24 @@ const startBingoGame = async (sessionCode: string, userId: string) => {
         if (data.success && data.session.status === 'finished') {
           stopWinnerPolling();
           
-          // Show winner announcement
           if (data.session.winner_user_id === userId) {
             alert('🎉 Congratulations! You won the game!');
           } else {
-            // Get winner info from players list
             const winner = data.players.find((p: any) => p.user_id === data.session.winner_user_id);
             alert(`🏆 ${winner?.first_name || winner?.username || 'Another player'} won the game!`);
           }
           
-          // Clean up
           localStorage.removeItem('currentSession');
           localStorage.removeItem('multiplayerSession');
           setGameSession(null);
+          
+          // Refresh cartelas
+          fetchCartelas();
         }
       } catch (error) {
         console.error('Winner polling error:', error);
       }
-    }, 3000); // Poll every 3 seconds
+    }, 3000);
   };
 
   const stopPolling = () => {
@@ -647,7 +825,6 @@ const startBingoGame = async (sessionCode: string, userId: string) => {
     }
   };
 
-  // Handle countdown cancellation
   const handleCountdownCancel = (reason: string) => {
     setShowCountdown(false);
     setGameSession(null);
@@ -660,41 +837,37 @@ const startBingoGame = async (sessionCode: string, userId: string) => {
     }
   };
 
-// In card-picker.tsx - Enhanced handleCountdownStart
-const handleCountdownStart = () => {
-  if (gameSession?.code && currentUser?.id) {
-    // Get stored session data if available
-    const storedSessionData = localStorage.getItem('currentSessionData');
-    if (storedSessionData) {
-      const sessionData = JSON.parse(storedSessionData);
-      console.log('Starting game with session data:', sessionData);
-      localStorage.removeItem('currentSessionData'); // Clean up
+  const handleCountdownStart = () => {
+    if (gameSession?.code && currentUser?.id) {
+      const storedSessionData = localStorage.getItem('currentSessionData');
+      if (storedSessionData) {
+        const sessionData = JSON.parse(storedSessionData);
+        console.log('Starting game with session data:', sessionData);
+        localStorage.removeItem('currentSessionData');
+      }
+      
+      startBingoGame(gameSession.code, currentUser.id);
     }
-    
-    startBingoGame(gameSession.code, currentUser.id);
-  }
-};
-  // Handle bingo game close
+  };
+
   const handleBingoGameClose = () => {
     console.log('🎮 Closing BINGO game');
     setShowBingoGame(false);
     setBingoGameData(null);
     
-    // Clear selection
     setSelectedCartela(null);
     setBingoCardNumbers([]);
     setGeneratedCardData(null);
+    setMyWaitingCartela(null);
+    setWaitingExpiryTime(null);
     
-    // Clean up session
     setGameSession(null);
     localStorage.removeItem('currentSession');
     localStorage.removeItem('multiplayerSession');
     
-    // Stop all polling
     stopPolling();
     stopWinnerPolling();
     
-    // Refresh cartelas
     fetchCartelas();
     
     playSound('click');
@@ -702,6 +875,11 @@ const handleCountdownStart = () => {
 
   const handleLogout = () => {
     if (confirm('Are you sure you want to logout?')) {
+      // Release any waiting cartela first
+      if (myWaitingCartela && currentUser) {
+        releaseCartela();
+      }
+      
       localStorage.removeItem('currentUser');
       localStorage.removeItem('token');
       localStorage.removeItem('auth_token');
@@ -720,8 +898,9 @@ const handleCountdownStart = () => {
       setBingoGameData(null);
       setGameSession(null);
       setShowCountdown(false);
+      setMyWaitingCartela(null);
+      setWaitingExpiryTime(null);
       
-      // Stop polling
       stopPolling();
       stopWinnerPolling();
       
@@ -759,7 +938,6 @@ const handleCountdownStart = () => {
     playSound('click');
   };
 
-  // Debug: Log when showBingoGame changes
   useEffect(() => {
     console.log('🎮 Game states:', {
       showBingoGame,
@@ -818,8 +996,6 @@ const handleCountdownStart = () => {
         </div>
       )}
 
-     
-
       {/* Top Action Buttons */}
       {currentUser && !showBingoGame && !showCountdown && (
         <div className="fixed top-2 right-4 z-300 flex gap-2">
@@ -840,6 +1016,13 @@ const handleCountdownStart = () => {
             <TrophyFill size={16} />
             {showQuickStats ? 'Hide Stats' : 'Show Stats'}
           </button>
+          <button
+            onClick={toggleSound}
+            className="p-2.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-full hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm"
+            title={soundEnabled ? 'Mute Sound' : 'Unmute Sound'}
+          >
+            {soundEnabled ? <VolumeUpFill size={16} /> : <VolumeMuteFill size={16} />}
+          </button>
         </div>
       )}
 
@@ -852,8 +1035,6 @@ const handleCountdownStart = () => {
               <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 via-pink-600/20 to-indigo-600/20 backdrop-blur-sm"></div>
               <div className="relative bg-gradient-to-r from-indigo-700/90 via-purple-700/90 to-pink-700/90 text-white rounded-3xl p-6 md:p-8 shadow-2xl border border-white/10">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                 
-                  
                   {/* User Info */}
                   {currentUser ? (
                     <div className="flex flex-col items-center md:items-end gap-3">
@@ -937,12 +1118,11 @@ const handleCountdownStart = () => {
                       <div>
                         <p className="text-sm text-white/70 mb-1">Available Cartelas</p>
                         <p className="text-sm font-bold text-white">
-                          {cartelas.filter(c => c.is_available).length}
-                          <span className="text-sm text-white/50"> </span>
+                          {cartelas.filter(c => c.status === 'available').length}
                         </p>
                       </div>
                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center">
-                        
+                        <StarFill size={20} className="text-white" />
                       </div>
                     </div>
                   </div>
@@ -950,13 +1130,13 @@ const handleCountdownStart = () => {
                   <div className="bg-gradient-to-br from-blue-600/20 to-cyan-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-white/70 mb-1">Balance</p>
+                        <p className="text-sm text-white/70 mb-1">Waiting Cartelas</p>
                         <p className="text-sm font-bold text-white">
-                          {currentUser.balance?.toFixed(2)}
+                          {Object.keys(waitingCartelas).length}
                         </p>
                       </div>
                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 flex items-center justify-center">
-                        
+                        <ClockFill size={20} className="text-white" />
                       </div>
                     </div>
                   </div>
@@ -964,13 +1144,13 @@ const handleCountdownStart = () => {
                   <div className="bg-gradient-to-br from-green-600/20 to-emerald-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-white/70 mb-1">Bonus</p>
+                        <p className="text-sm text-white/70 mb-1">Balance</p>
                         <p className="text-sm font-bold text-white">
-                          ETB {currentUser.bonusBalance?.toFixed(2) || '0.00'}
+                          ETB {currentUser.balance?.toFixed(2) || '0.00'}
                         </p>
                       </div>
                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 flex items-center justify-center">
-                        
+                        <Coin size={20} className="text-white" />
                       </div>
                     </div>
                   </div>
@@ -984,7 +1164,7 @@ const handleCountdownStart = () => {
                         </p>
                       </div>
                       <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
-                        
+                        <CardChecklist size={20} className="text-white" />
                       </div>
                     </div>
                   </div>
@@ -999,10 +1179,11 @@ const handleCountdownStart = () => {
                 {/* Controls Header */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                   <div>
-                    <h2 className="text-2xl font-bold text-white mb-2"></h2>
+                    <h2 className="text-2xl font-bold text-white mb-2">Select Your Cartela</h2>
                     <div className="flex items-center gap-3">
                       <span className="text-sm text-white/70">
-                        {filteredCartelas.filter(c => c.is_available).length} available
+                        {filteredCartelas.filter(c => c.status === 'available').length} available •{' '}
+                        {Object.keys(waitingCartelas).length} waiting
                       </span>
                       <button
                         onClick={() => setShowFilters(!showFilters)}
@@ -1013,8 +1194,6 @@ const handleCountdownStart = () => {
                       </button>
                     </div>
                   </div>
-                  
-                
                 </div>
                 
                 {/* Filters */}
@@ -1081,44 +1260,81 @@ const handleCountdownStart = () => {
                       <p className="text-white/50">No cartelas found</p>
                     </div>
                   ) : (
-                    filteredCartelas.map((cartela) => (
-                      <div
-                        key={cartela.id}
-                        className={`relative group ${viewMode === 'compact' ? 'h-6' : 'h-6' } ring-2 ring-green-400 ring-offset-2 ring-offset-black/50`}
-                        onClick={() => cartela.is_available && handleCartelaSelect(cartela)}
-                      >
-
-                        <div className={`absolute inset-0 rounded-lg transition-all duration-300 ${
-                          cartela.is_available
-                            ? 'bg-gradient-to-br from-blue-500/20 to-purple-500/20 group-hover:from-blue-500/30 group-hover:to-purple-500/30'
-                            : 'bg-gradient-to-br from-red-500/20 to-pink-500/20'
-                        } ${selectedCartela?.id === cartela.id ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-black/50' : ''}`}></div>
-                        
-                        <div className={`relative h-full flex items-center justify-center rounded-lg transition-all duration-300 ${
-                          selectedCartela?.id === cartela.id
-                            ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-black font-bold scale-105'
-                            : cartela.is_available
-                              ? 'bg-gradient-to-br from-white/10 to-white/5 text-white group-hover:bg-white/20 group-hover:scale-105'
-                              : 'bg-gradient-to-br from-red-900/30 to-pink-900/30 text-white/50'
-                        } ${!cartela.is_available ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
-                          <span className={`${viewMode === 'compact' ? 'text-xs' : 'text-sm'} font-semibold`}>
-                            {cartela.cartela_number}
-                          </span>
+                    filteredCartelas.map((cartela) => {
+                      const isWaiting = waitingCartelas[cartela.id];
+                      const isMyWaiting = isWaiting && isWaiting.userId === currentUser?.id;
+                      const isTakenByOther = isWaiting && !isMyWaiting;
+                      
+                      return (
+                        <div
+                          key={cartela.id}
+                          className={`relative group ${viewMode === 'compact' ? 'h-6' : 'h-6'} ring-2 ${
+                            isMyWaiting ? 'ring-yellow-400' : 
+                            isTakenByOther ? 'ring-orange-400' : 
+                            cartela.status === 'available' ? 'ring-green-400' : 'ring-red-400'
+                          } ring-offset-2 ring-offset-black/50`}
+                          onClick={() => {
+                            if (cartela.status === 'available' || isMyWaiting) {
+                              handleCartelaSelect(cartela);
+                            } else if (isTakenByOther) {
+                              alert(`Cartela ${cartela.cartela_number} is currently selected by ${isWaiting.username || 'another user'} (expires in ${Math.floor(isWaiting.expiresInSeconds / 60)}:${(isWaiting.expiresInSeconds % 60).toString().padStart(2, '0')})`);
+                            } else if (cartela.status === 'in_game') {
+                              alert(`Cartela ${cartela.cartela_number} is already in an active game`);
+                            }
+                          }}
+                        >
+                          <div className={`absolute inset-0 rounded-lg transition-all duration-300 ${
+                            isMyWaiting
+                              ? 'bg-gradient-to-br from-yellow-500/30 to-orange-500/30'
+                              : isTakenByOther
+                                ? 'bg-gradient-to-br from-orange-500/20 to-red-500/20'
+                                : cartela.status === 'available'
+                                  ? 'bg-gradient-to-br from-blue-500/20 to-purple-500/20 group-hover:from-blue-500/30 group-hover:to-purple-500/30'
+                                  : 'bg-gradient-to-br from-red-500/20 to-pink-500/20'
+                          } ${selectedCartela?.id === cartela.id ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-black/50' : ''}`}></div>
                           
-                          {!cartela.is_available && (
-                            <div className="absolute -top-1 -right-1 w-12 h-12 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center">
-                              <XCircle size={10} className="text-white" />
-                            </div>
-                          )}
-                          
-                          {selectedCartela?.id === cartela.id && (
-                            <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center animate-pulse shadow-lg">
-                              <StarFill size={12} className="text-white" />
-                            </div>
-                          )}
+                          <div className={`relative h-full flex items-center justify-center rounded-lg transition-all duration-300 ${
+                            selectedCartela?.id === cartela.id
+                              ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-black font-bold scale-105'
+                              : isMyWaiting
+                                ? 'bg-gradient-to-br from-yellow-500/50 to-orange-500/50 text-white font-bold'
+                                : isTakenByOther
+                                  ? 'bg-gradient-to-br from-orange-900/30 to-red-900/30 text-white/70'
+                                  : cartela.status === 'available'
+                                    ? 'bg-gradient-to-br from-white/10 to-white/5 text-white group-hover:bg-white/20 group-hover:scale-105'
+                                    : 'bg-gradient-to-br from-red-900/30 to-pink-900/30 text-white/50'
+                          } ${cartela.status !== 'available' && !isMyWaiting ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                            <span className={`${viewMode === 'compact' ? 'text-xs' : 'text-sm'} font-semibold`}>
+                              {cartela.cartela_number}
+                            </span>
+                            
+                            {isMyWaiting && waitingExpiryTime !== null && (
+                              <div className="absolute -top-3 -right-3 px-1.5 py-0.5 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full text-[10px] font-bold text-white animate-pulse shadow-lg">
+                                {Math.floor(waitingExpiryTime / 60)}:{(waitingExpiryTime % 60).toString().padStart(2, '0')}
+                              </div>
+                            )}
+                            
+                            {isTakenByOther && (
+                              <div className="absolute -top-2 -right-2 w-5 h-5 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center">
+                                <PersonCircle size={10} className="text-white" />
+                              </div>
+                            )}
+                            
+                            {cartela.status === 'in_game' && !isWaiting && (
+                              <div className="absolute -top-2 -right-2 w-5 h-5 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center">
+                                <XCircle size={10} className="text-white" />
+                              </div>
+                            )}
+                            
+                            {selectedCartela?.id === cartela.id && !isMyWaiting && (
+                              <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center animate-pulse shadow-lg">
+                                <StarFill size={12} className="text-white" />
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
                 
@@ -1135,21 +1351,25 @@ const handleCountdownStart = () => {
                             <p className="text-sm font-bold text-white">
                               Selected: <span className="text-xl text-yellow-300">{selectedCartela.cartela_number}</span>
                             </p>
-                            
+                            {myWaitingCartela && waitingExpiryTime !== null && (
+                              <p className="text-xs text-yellow-300">
+                                Reserved for {Math.floor(waitingExpiryTime / 60)}:{(waitingExpiryTime % 60).toString().padStart(2, '0')}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </div>
                       
                       <div className="flex gap-3">
                         <button
-                          onClick={() => setSelectedCartela(null)}
+                          onClick={releaseCartela}
                           className="px-1 py-1 bg-gradient-to-r from-red-500/20 to-pink-500/20 text-white rounded-sm hover:bg-red-500/30 transition-all backdrop-blur-sm border border-red-500/20 flex items-center gap-2"
                         >
-                          <XCircle size={10} /> Clear
+                          <XCircle size={10} /> Clear & Release
                         </button>
                         <button
                           onClick={startMultiplayerGame}
-                          disabled={isLoading}
+                          disabled={isLoading || !myWaitingCartela}
                           className="px-2 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold rounded-xl hover:shadow-2xl hover:scale-105 transition-all disabled:opacity-50 backdrop-blur-sm flex items-center gap-2"
                         >
                           {isLoading ? (
@@ -1180,7 +1400,6 @@ const handleCountdownStart = () => {
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-white">BINGO Card Preview</h3>
-                      
                     </div>
                   </div>
                   
@@ -1193,7 +1412,7 @@ const handleCountdownStart = () => {
                 
                 <div className="mb-4">
                   {/* BINGO Letters Header */}
-                  <div className="grid grid-cols-5  mb-2">
+                  <div className="grid grid-cols-5 mb-2">
                     {['B', 'I', 'N', 'G', 'O'].map((letter, index) => (
                       <div 
                         key={letter}
@@ -1242,7 +1461,7 @@ const handleCountdownStart = () => {
                             {cellNumber}
                             {index === 12 && (
                               <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-xs text-center px-2"></span>
+                                <span className="text-xs text-center px-2">FREE</span>
                               </div>
                             )}
                           </div>
@@ -1265,8 +1484,6 @@ const handleCountdownStart = () => {
                     )}
                   </div>
                 </div>
-                
-               
               </div>
             </div>
             
@@ -1279,10 +1496,8 @@ const handleCountdownStart = () => {
                       <ShieldCheck size={10} className="text-white" />
                     </div>
                     <div>
-                    
                       <p className="text-sm text-green-300">
-                        Playing as: {currentUser.firstName} • 
-                        
+                        Playing as: {currentUser.firstName} • {Object.keys(waitingCartelas).length} cartelas waiting
                       </p>
                     </div>
                   </div>
