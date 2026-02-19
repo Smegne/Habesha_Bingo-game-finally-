@@ -482,6 +482,7 @@ const syncCalledNumbers = useCallback(async () => {
             // No winner data but game ended - show generic message
             console.log('Game ended but no winner data');
             setWinnerAnnouncement({
+              
               winner: {
                 userId: '',
                 username: 'Someone',

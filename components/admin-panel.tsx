@@ -186,10 +186,10 @@ interface Deposit {
   amount: number;
   method: string;
   status: 'pending' | 'approved' | 'rejected' | 'failed';
-  transaction_ref?: string; // Actual DB field name
-  transaction_id?: string; // Frontend expects this
-  screenshot_url?: string; // Actual DB field name
-  proof_image?: string; // Frontend expects this
+  transaction_ref?: string;
+  transaction_id?: string;
+  screenshot_url?: string;
+  proof_image?: string;
   admin_notes?: string;
   approved_by?: string;
   approved_at?: string;
@@ -202,6 +202,7 @@ interface Deposit {
     balance: number | string;
   };
 }
+
 export function AdminPanelEnhanced() {
   console.log('AdminPanelEnhanced component rendering');
   
@@ -237,6 +238,7 @@ export function AdminPanelEnhanced() {
   const [dateRange, setDateRange] = useState({ start: "", end: "" })
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(20)
+  const [lastPollTime, setLastPollTime] = useState<Date | null>(null)
   
   // New state for fetched users data
   const [usersData, setUsersData] = useState<User[]>([])
@@ -255,91 +257,103 @@ export function AdminPanelEnhanced() {
 
   console.log('Dashboard stats state:', dashboardStats);
 
-  // Real-time updates using WebSocket
-  const wsRef = useRef<WebSocket | null>(null)
-
-  // Initialize WebSocket connection
+  // POLLING SETUP - REPLACES WEBSOCKET
   useEffect(() => {
-    console.log('AdminPanel: useEffect running');
+    console.log('AdminPanel: Setting up polling for real-time updates');
     
-    const connectWebSocket = () => {
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3000'
-      const token = localStorage.getItem('token')
-      
-      if (!token) return
-      
-      const ws = new WebSocket(`${wsUrl}?token=${token}`)
-      
-      ws.onopen = () => {
-        console.log('Admin WebSocket connected')
-      }
-      
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        handleWebSocketMessage(data)
-      }
-      
-      ws.onclose = () => {
-        console.log('Admin WebSocket disconnected, attempting reconnect...')
-        setTimeout(connectWebSocket, 3000)
-      }
-      
-      ws.onerror = (error) => {
-        console.error('Admin WebSocket error:', error)
-      }
-      
-      wsRef.current = ws
-    }
+    let pollInterval: NodeJS.Timeout;
+    let isActive = true;
     
-    connectWebSocket()
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
-    }
-  }, [])
-
-  // Handle WebSocket messages
-  const handleWebSocketMessage = (data: any) => {
-    switch (data.type) {
-      case 'new_deposit':
-        toast.info(`New deposit: ${data.amount} ETB`, {
-          description: `From: ${data.username}`,
-        })
-        if (activeNav === 'deposits') {
-          fetchDepositsData()
+    const pollForUpdates = async () => {
+      if (!isActive) return;
+      
+      try {
+        console.log('Polling: Checking for updates...');
+        
+        // Track previous pending counts for notifications
+        const prevPendingDeposits = depositsData.filter(d => d.status === 'pending').length;
+        
+        // Fetch latest stats based on active tab
+        switch (activeNav) {
+          case 'dashboard':
+            await fetchDashboardData();
+            break;
+            
+          case 'deposits':
+            await fetchDepositsData();
+            // Check for new pending deposits
+            const newPendingCount = depositsData.filter(d => d.status === 'pending').length;
+            if (newPendingCount > prevPendingDeposits) {
+              toast.info(`${newPendingCount - prevPendingDeposits} new pending deposit(s)`, {
+                description: 'New deposits waiting for approval',
+                duration: 5000,
+              });
+            }
+            break;
+            
+          case 'users':
+            await fetchUsersData();
+            break;
+            
+          case 'withdrawals':
+            await fetchWithdrawalsData();
+            break;
+            
+          case 'transactions':
+            await fetchTransactionsData();
+            break;
+            
+          case 'games':
+            await fetchGamesData();
+            break;
+            
+          case 'analytics':
+            await fetchAnalyticsData();
+            break;
         }
-        fetchDashboardData()
-        break
         
-      case 'new_withdrawal':
-        toast.info(`New withdrawal request: ${data.amount} ETB`, {
-          description: `From: ${data.username}`,
-        })
-        fetchDashboardData()
-        break
+        // Update last poll time on successful fetch
+        setLastPollTime(new Date());
         
-      case 'game_started':
-        toast.success('Game started', {
-          description: `Stake: ${data.stake} ETB`,
-        })
-        break
-        
-      case 'game_completed':
-        toast.success('Game completed!', {
-          description: `Winner: ${data.winnerName} - ${data.winAmount} ETB`,
-        })
-        fetchDashboardData()
-        break
-        
-      case 'user_online':
-        toast.info('User online', {
-          description: data.username,
-        })
-        break
-    }
-  }
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    };
+
+    // Initial poll
+    pollForUpdates();
+
+    // Set up polling interval (every 15 seconds for active tabs, 30 for background)
+    const setupPolling = () => {
+      const isTabActive = !document.hidden;
+      const intervalTime = isTabActive ? 15000 : 30000; // 15s active, 30s background
+      
+      console.log(`Polling interval set to ${intervalTime}ms (${isTabActive ? 'active' : 'background'} tab)`);
+      
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(pollForUpdates, intervalTime);
+    };
+
+    // Initial setup
+    setupPolling();
+
+    // Handle visibility change (reduce polling when tab is inactive)
+    const handleVisibilityChange = () => {
+      setupPolling();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Cleanup
+    return () => {
+      console.log('AdminPanel: Cleaning up polling');
+      isActive = false;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [activeNav]); // Re-run when activeNav changes
 
   // Update the handleNavClick function
   const handleNavClick = (navId: string) => {
@@ -347,7 +361,7 @@ export function AdminPanelEnhanced() {
     setActiveNav(navId);
     setIsMobileMenuOpen(false);
     
-    // Fetch data based on selected nav
+    // Immediate fetch when switching tabs (don't wait for polling)
     switch (navId) {
       case 'dashboard':
         fetchDashboardData();
@@ -443,205 +457,199 @@ export function AdminPanelEnhanced() {
   };
 
   // Fetch deposits data
+  const fetchDepositsData = async () => {
+    console.log('=== FETCH DEPOSITS START ===');
+    try {
+      setIsLoading(true);
+      
+      const url = `/api/admin/working-data?type=deposits&page=${currentPage}&limit=${itemsPerPage}&status=${depositStatusFilter}`;
+      console.log('Fetching from:', url);
+      
+      const response = await fetch(url);
+      console.log('Response status:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('API response success:', data.success);
+      console.log('Full data:', data);
+      
+      if (data.success && data.data) {
+        const deposits = data.data.deposits || [];
+        console.log('Raw deposits received:', deposits);
+        
+        // Map to your frontend interface
+        const formattedDeposits = deposits.map((deposit: any) => {
+          console.log('Processing deposit:', deposit.id);
+          
+          return {
+            id: deposit.id,
+            user_id: deposit.user_id,
+            amount: typeof deposit.amount === 'string' ? parseFloat(deposit.amount) : deposit.amount,
+            method: deposit.method || 'telebirr',
+            status: deposit.status || 'pending',
+            transaction_id: deposit.transaction_ref || deposit.transaction_id,
+            proof_image: deposit.screenshot_url || deposit.proof_image,
+            admin_notes: deposit.admin_notes,
+            approved_by: deposit.approved_by,
+            approved_at: deposit.approved_at,
+            created_at: deposit.created_at,
+            updated_at: deposit.updated_at,
+            user: {
+              username: deposit.username || 'Unknown',
+              first_name: deposit.first_name || 'User',
+              telegram_id: deposit.telegram_id || 'N/A',
+              balance: typeof deposit.user_balance === 'string' ? parseFloat(deposit.user_balance) : deposit.user_balance
+            }
+          };
+        });
+        
+        console.log('Formatted deposits:', formattedDeposits);
+        setDepositsData(formattedDeposits);
+        
+        if (formattedDeposits.length > 0) {
+          toast.success(`Loaded ${formattedDeposits.length} deposits`);
+        } else {
+          toast.info('No deposits found');
+        }
+      } else {
+        console.error('API returned failure:', data);
+        toast.error(data.message || 'Failed to load deposits');
+      }
+    } catch (error: any) {
+      console.error('Fetch error:', error);
+      toast.error(`Failed to load deposits: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+      console.log('=== FETCH DEPOSITS END ===');
+    }
+  };
 
-// In your admin panel - Update the deposits data handling
-const fetchDepositsData = async () => {
-  console.log('=== FETCH DEPOSITS START ===');
-  try {
-    setIsLoading(true);
+  // Approve deposit
+  const handleApproveDeposit = async (depositId: string) => {
+    console.log('=== APPROVE DEPOSIT ===');
     
-    const url = `/api/admin/working-data?type=deposits&page=${currentPage}&limit=${itemsPerPage}&status=${depositStatusFilter}`;
-    console.log('Fetching from:', url);
-    
-    const response = await fetch(url);
-    console.log('Response status:', response.status);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const deposit = depositsData.find(d => d.id === depositId);
+    if (!deposit) {
+      toast.error('Deposit not found');
+      return;
     }
     
-    const data = await response.json();
-    console.log('API response success:', data.success);
-    console.log('Full data:', data);
-    
-    if (data.success && data.data) {
-      const deposits = data.data.deposits || [];
-      console.log('Raw deposits received:', deposits);
+    if (!confirm(`Approve ${deposit.amount} ETB deposit from ${deposit.user?.username}?`)) {
+      return;
+    }
+
+    try {
+      setIsProcessingDeposit(true);
       
-      // Map to your frontend interface
-      const formattedDeposits = deposits.map((deposit: any) => {
-        console.log('Processing deposit:', deposit.id);
-        
-        return {
-          id: deposit.id,
-          user_id: deposit.user_id,
-          amount: typeof deposit.amount === 'string' ? parseFloat(deposit.amount) : deposit.amount,
-          method: deposit.method || 'telebirr',
-          status: deposit.status || 'pending',
-          transaction_id: deposit.transaction_ref || deposit.transaction_id, // Use transaction_ref from DB
-          proof_image: deposit.screenshot_url || deposit.proof_image, // Use screenshot_url from DB
-          admin_notes: deposit.admin_notes,
-          approved_by: deposit.approved_by,
-          approved_at: deposit.approved_at,
-          created_at: deposit.created_at,
-          updated_at: deposit.updated_at,
-          user: {
-            username: deposit.username || 'Unknown',
-            first_name: deposit.first_name || 'User',
-            telegram_id: deposit.telegram_id || 'N/A',
-            balance: typeof deposit.user_balance === 'string' ? parseFloat(deposit.user_balance) : deposit.user_balance
-          }
-        };
+      const payload = {
+        action: 'approve',
+        type: 'deposits',
+        ids: [depositId]
+      };
+      
+      console.log('Sending payload:', payload);
+      
+      const response = await fetch('/api/admin/working-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
       
-      console.log('Formatted deposits:', formattedDeposits);
-      setDepositsData(formattedDeposits);
+      console.log('Response status:', response.status);
       
-      if (formattedDeposits.length > 0) {
-        toast.success(`Loaded ${formattedDeposits.length} deposits`);
+      const data = await response.json();
+      console.log('Response data:', data);
+      
+      if (data.success) {
+        toast.success('✅ Deposit approved successfully!');
+        
+        // Update UI
+        setDepositsData(prev => prev.map(d => {
+          if (d.id === depositId) {
+            return {
+              ...d,
+              status: 'approved',
+              approved_by: 'admin',
+              approved_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+          }
+          return d;
+        }));
+        
+        // Refresh list
+        setTimeout(() => fetchDepositsData(), 1000);
+        
+        // Refresh dashboard
+        fetchDashboardData();
+        
       } else {
-        toast.info('No deposits found');
+        console.error('Approve failed:', data);
+        toast.error(data.message || 'Failed to approve deposit');
       }
-    } else {
-      console.error('API returned failure:', data);
-      toast.error(data.message || 'Failed to load deposits');
+      
+    } catch (error: any) {
+      console.error('Error:', error);
+      toast.error(`Error: ${error.message}`);
+    } finally {
+      setIsProcessingDeposit(false);
     }
-  } catch (error: any) {
-    console.error('Fetch error:', error);
-    toast.error(`Failed to load deposits: ${error.message}`);
-  } finally {
-    setIsLoading(false);
-    console.log('=== FETCH DEPOSITS END ===');
-  }
-};
-// Update the approve function
-const handleApproveDeposit = async (depositId: string) => {
-  console.log('=== APPROVE DEPOSIT ===');
-  
-  const deposit = depositsData.find(d => d.id === depositId);
-  if (!deposit) {
-    toast.error('Deposit not found');
-    return;
-  }
-  
-  if (!confirm(`Approve ${deposit.amount} ETB deposit from ${deposit.user?.username}?`)) {
-    return;
-  }
-
-  try {
-    setIsProcessingDeposit(true);
-    
-    // CORRECTED: No admin_notes in payload
-    const payload = {
-      action: 'approve',
-      type: 'deposits',
-      ids: [depositId]
-    };
-    
-    console.log('Sending payload:', payload);
-    
-    const response = await fetch('/api/admin/working-data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    console.log('Response status:', response.status);
-    
-    const data = await response.json();
-    console.log('Response data:', data);
-    
-    if (data.success) {
-      toast.success('✅ Deposit approved successfully!');
-      
-      // Update UI
-      setDepositsData(prev => prev.map(d => {
-        if (d.id === depositId) {
-          return {
-            ...d,
-            status: 'approved',
-            approved_by: 'admin',
-            approved_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          };
-        }
-        return d;
-      }));
-      
-      // Refresh list
-      setTimeout(() => fetchDepositsData(), 1000);
-      
-      // Refresh dashboard
-      fetchDashboardData();
-      
-    } else {
-      console.error('Approve failed:', data);
-      toast.error(data.message || 'Failed to approve deposit');
-    }
-    
-  } catch (error: any) {
-    console.error('Error:', error);
-    toast.error(`Error: ${error.message}`);
-  } finally {
-    setIsProcessingDeposit(false);
-  }
-};
-// Update the reject function
-const handleRejectDeposit = async (depositId: string, reason: string = '') => {
-  if (!reason.trim()) {
-    toast.error('Please provide a reason for rejection');
-    return;
-  }
-
-  if (!confirm('Are you sure you want to reject this deposit?')) {
-    return;
-  }
-
-  try {
-    setIsProcessingDeposit(true);
-    console.log('Rejecting deposit:', depositId);
-
-    const response = await fetch('/api/admin/working-data', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'reject',
-        type: 'deposits',
-        ids: [depositId],
-        admin_notes: reason,
-      }),
-    });
-
-    const data = await response.json();
-    console.log('Reject response:', data);
-
-    if (data.success) {
-      toast.success('Deposit rejected successfully!');
-      // Update the deposit status in the list
-      setDepositsData(prev => prev.map(deposit =>
-        deposit.id === depositId ? { ...deposit, status: 'rejected' } : deposit
-      ));
-      setRejectReason('');
-      // Refresh dashboard stats
-      fetchDashboardData();
-    } else {
-      toast.error(data.message || 'Failed to reject deposit');
-    }
-  } catch (error) {
-    console.error('Error rejecting deposit:', error);
-    toast.error('Failed to reject deposit');
-  } finally {
-    setIsProcessingDeposit(false);
-    setShowDepositDetails(false);
-  }
-};
-  // Approve deposit
- 
+  };
 
   // Reject deposit
- 
+  const handleRejectDeposit = async (depositId: string, reason: string = '') => {
+    if (!reason.trim()) {
+      toast.error('Please provide a reason for rejection');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to reject this deposit?')) {
+      return;
+    }
+
+    try {
+      setIsProcessingDeposit(true);
+      console.log('Rejecting deposit:', depositId);
+
+      const response = await fetch('/api/admin/working-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'reject',
+          type: 'deposits',
+          ids: [depositId],
+          admin_notes: reason,
+        }),
+      });
+
+      const data = await response.json();
+      console.log('Reject response:', data);
+
+      if (data.success) {
+        toast.success('Deposit rejected successfully!');
+        // Update the deposit status in the list
+        setDepositsData(prev => prev.map(deposit =>
+          deposit.id === depositId ? { ...deposit, status: 'rejected' } : deposit
+        ));
+        setRejectReason('');
+        // Refresh dashboard stats
+        fetchDashboardData();
+      } else {
+        toast.error(data.message || 'Failed to reject deposit');
+      }
+    } catch (error) {
+      console.error('Error rejecting deposit:', error);
+      toast.error('Failed to reject deposit');
+    } finally {
+      setIsProcessingDeposit(false);
+      setShowDepositDetails(false);
+    }
+  };
 
   // Bulk approve deposits
   const handleBulkApproveDeposits = async () => {
@@ -871,49 +879,40 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
     }
   };
 
-  // Initial data fetch
+  // Initial data fetch on mount and when activeNav changes
   useEffect(() => {
-    console.log('AdminPanel: Initial data fetch');
-    fetchAdminData();
-    fetchDashboardData();
+    console.log('AdminPanel: Initial data fetch for:', activeNav);
     
-    // Auto-fetch data based on active tab
-    if (activeNav === 'users') {
-      fetchUsersData();
-    } else if (activeNav === 'deposits') {
-      fetchDepositsData();
-    }
-    
-    // Refresh data every 30 seconds
-    const interval = setInterval(() => {
-      console.log('AdminPanel: Auto-refreshing data');
-      fetchDashboardData();
+    const fetchInitialData = async () => {
+      await fetchAdminData();
+      await fetchDashboardData();
       
-      // Refresh current tab data
+      // Fetch data based on active tab
       switch (activeNav) {
         case 'users':
-          fetchUsersData();
+          await fetchUsersData();
           break;
         case 'deposits':
-          fetchDepositsData();
+          await fetchDepositsData();
           break;
         case 'withdrawals':
-          fetchWithdrawalsData();
+          await fetchWithdrawalsData();
           break;
         case 'games':
-          fetchGamesData();
+          await fetchGamesData();
           break;
         case 'transactions':
-          fetchTransactionsData();
+          await fetchTransactionsData();
+          break;
+        case 'analytics':
+          await fetchAnalyticsData();
           break;
       }
-    }, 30000);
+    };
     
-    return () => {
-      console.log('AdminPanel: Cleaning up interval');
-      clearInterval(interval);
-    }
-  }, [activeNav]);
+    fetchInitialData();
+    
+  }, [activeNav]); // Only re-run when activeNav changes
 
   // Handle refresh
   const handleRefresh = async () => {
@@ -974,7 +973,7 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
     { month: 'Jun', users: dashboardStats?.total_users || 350 },
   ];
 
-  // Render Sidebar (same as before)
+  // Render Sidebar
   const renderSidebar = () => (
     <div className={cn(
       "fixed inset-y-0 left-0 z-50 flex flex-col bg-background border-r transition-all duration-300 ease-in-out",
@@ -1085,7 +1084,7 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
     </div>
   );
 
-  // Render Dashboard (same as before)
+  // Render Dashboard
   const renderDashboard = () => (
     <div className="space-y-6">
       {/* Header */}
@@ -1095,6 +1094,12 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
           <p className="text-muted-foreground">Welcome back, {user?.firstName}. Here's what's happening.</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Last Updated Indicator */}
+          {lastPollTime && (
+            <div className="text-xs text-muted-foreground mr-2">
+              Last updated: {lastPollTime.toLocaleTimeString()}
+            </div>
+          )}
           <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
             <RefreshCw className={cn("h-4 w-4 mr-2", isRefreshing && "animate-spin")} />
             Refresh
@@ -1168,7 +1173,7 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
         })}
       </div>
 
-      {/* Charts (same as before) */}
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -1227,7 +1232,7 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
     </div>
   );
 
-  // Render Users Management (same as before)
+  // Render Users Management
   const renderUsers = () => (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1236,6 +1241,11 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
           <p className="text-muted-foreground">Manage all registered users and their accounts</p>
         </div>
         <div className="flex items-center gap-2">
+          {lastPollTime && (
+            <div className="text-xs text-muted-foreground mr-2">
+              Last updated: {lastPollTime.toLocaleTimeString()}
+            </div>
+          )}
           <Button 
             variant="outline" 
             onClick={fetchUsersData}
@@ -1251,7 +1261,7 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
         </div>
       </div>
 
-      {/* Users table implementation (same as before) */}
+      {/* Users table */}
       <Card>
         <CardContent className="p-0">
           {isLoading && usersData.length === 0 ? (
@@ -1351,6 +1361,11 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
           <p className="text-muted-foreground">Review and approve user deposit requests</p>
         </div>
         <div className="flex items-center gap-2">
+          {lastPollTime && (
+            <div className="text-xs text-muted-foreground mr-2">
+              Last updated: {lastPollTime.toLocaleTimeString()}
+            </div>
+          )}
           <Button 
             variant="outline" 
             onClick={fetchDepositsData}
@@ -1746,7 +1761,7 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
                                       />
                                     </div>
                                     <Button 
-                                      onClick={() => handleRejectDeposit(deposit.id)}
+                                      onClick={() => handleRejectDeposit(deposit.id, rejectReason)}
                                       disabled={!rejectReason.trim() || isProcessingDeposit}
                                       className="w-full"
                                     >
@@ -1811,7 +1826,14 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
   // Render other sections (simplified placeholders)
   const renderWithdrawals = () => (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Withdrawal Management</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold tracking-tight">Withdrawal Management</h1>
+        {lastPollTime && (
+          <div className="text-xs text-muted-foreground">
+            Last updated: {lastPollTime.toLocaleTimeString()}
+          </div>
+        )}
+      </div>
       <p className="text-muted-foreground">Manage and process withdrawal requests</p>
       {/* Add withdrawals table */}
     </div>
@@ -1819,7 +1841,14 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
 
   const renderGames = () => (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Games Management</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold tracking-tight">Games Management</h1>
+        {lastPollTime && (
+          <div className="text-xs text-muted-foreground">
+            Last updated: {lastPollTime.toLocaleTimeString()}
+          </div>
+        )}
+      </div>
       <p className="text-muted-foreground">Monitor and manage active games</p>
       {/* Add games table */}
     </div>
@@ -1827,7 +1856,14 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
 
   const renderTransactions = () => (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Transaction History</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold tracking-tight">Transaction History</h1>
+        {lastPollTime && (
+          <div className="text-xs text-muted-foreground">
+            Last updated: {lastPollTime.toLocaleTimeString()}
+          </div>
+        )}
+      </div>
       <p className="text-muted-foreground">View all system transactions</p>
       {/* Add transactions table */}
     </div>
@@ -1835,7 +1871,14 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
 
   const renderAnalytics = () => (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Analytics Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold tracking-tight">Analytics Dashboard</h1>
+        {lastPollTime && (
+          <div className="text-xs text-muted-foreground">
+            Last updated: {lastPollTime.toLocaleTimeString()}
+          </div>
+        )}
+      </div>
       <p className="text-muted-foreground">Detailed analytics and insights</p>
       {/* Add analytics charts */}
     </div>
@@ -2030,7 +2073,7 @@ const handleRejectDeposit = async (depositId: string, reason: string = '') => {
                           />
                         </div>
                         <Button 
-                          onClick={() => handleRejectDeposit(selectedDeposit.id)}
+                          onClick={() => handleRejectDeposit(selectedDeposit.id, rejectReason)}
                           disabled={!rejectReason.trim() || isProcessingDeposit}
                           className="w-full"
                         >
