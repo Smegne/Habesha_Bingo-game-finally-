@@ -211,11 +211,11 @@ bot.command('deposit', async (ctx) => {
     '💵 Deposit Funds\n\n' +
     'Send money to:\n\n' +
     '📱 TeleBirr:\n' +
-    '• 0911-111-1111 (Habesha Bingo)\n' +
-    '• 0911-222-2222 (Habesha Bingo)\n\n' +
+    '• 0962935163 (Melsew Abebei)\n' +
+    '• 0940192676 (Habesha Bingo)\n\n' +
     '🏦 CBE Birr:\n' +
-    '• Account: 1000-1234-5678\n' +
-    '• Name: Habesha Bingo\n\n' +
+    '• Account: 1000433547741\n' +
+    '• Name: Simegnew Destaw\n\n' +
     '📌 Instructions:\n' +
     '1. Send money to any number above\n' +
     '2. Take screenshot of payment\n' +
