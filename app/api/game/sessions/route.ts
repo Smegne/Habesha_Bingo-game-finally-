@@ -167,7 +167,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// app/api/game/sessions/route.ts - Add GET endpoint to return called numbers
+
+// In the GET function, after getting session data, add winner details lookup
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -185,7 +187,7 @@ export async function GET(request: NextRequest) {
       SELECT 
         gs.*,
         TIMESTAMPDIFF(SECOND, gs.countdown_start_at, NOW()) as elapsed_seconds,
-        gs.called_numbers  -- Add this field to your game_sessions table
+        gs.called_numbers
       FROM game_sessions gs
       WHERE gs.session_code = ?
     `, [sessionCode]) as any[];
@@ -255,6 +257,46 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // --- NEW: Get winner details if session has a winner ---
+    let winnerDetails = null;
+    if (session.winner_id) {
+      const winnerResult = await db.query(`
+        SELECT 
+          gw.user_id,
+          u.username,
+          gw.win_type,
+          gw.win_pattern,
+          gw.prize_amount,
+          gw.declared_at
+        FROM game_wins gw
+        JOIN users u ON gw.user_id = u.id
+        WHERE gw.session_id = ?
+        ORDER BY gw.declared_at DESC
+        LIMIT 1
+      `, [session.id]) as any[];
+      
+      if (winnerResult && winnerResult.length > 0) {
+        winnerDetails = {
+          userId: winnerResult[0].user_id,
+          username: winnerResult[0].username,
+          winType: winnerResult[0].win_type,
+          winPattern: winnerResult[0].win_pattern ? JSON.parse(winnerResult[0].win_pattern) : null,
+          prizeAmount: winnerResult[0].prize_amount || 0,
+          declaredAt: winnerResult[0].declared_at
+        };
+      } else {
+        // Fallback if no game_wins record yet
+        winnerDetails = {
+          userId: session.winner_id,
+          username: players.find(p => p.user_id === session.winner_id)?.username || 'Player',
+          winType: session.winning_type || 'BINGO',
+          winPattern: session.winning_pattern ? JSON.parse(session.winning_pattern) : null,
+          prizeAmount: 0,
+          declaredAt: session.ended_at || new Date().toISOString()
+        };
+      }
+    }
+
     return NextResponse.json({
       success: true,
       session: {
@@ -266,11 +308,13 @@ export async function GET(request: NextRequest) {
         createdAt: session.created_at,
         startedAt: session.started_at,
         finishedAt: session.finished_at,
-        winnerUserId: session.winner_user_id,
+        winnerUserId: session.winner_id,
         winningPattern: session.winning_pattern,
         shouldStartGame: shouldStartGame,
-        calledNumbers: calledNumbers,  // Add called numbers to response
-        lastCalledNumber: calledNumbers.length > 0 ? calledNumbers[calledNumbers.length - 1] : null
+        calledNumbers: calledNumbers,
+        lastCalledNumber: calledNumbers.length > 0 ? calledNumbers[calledNumbers.length - 1] : null,
+        // --- NEW: Include winner details directly ---
+        winner: winnerDetails
       },
       players: players || [],
       userRole: userRole

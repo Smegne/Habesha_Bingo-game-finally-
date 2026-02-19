@@ -63,6 +63,38 @@ interface WinDetails {
   message?: string;
   winType?: string;
   winPattern?: number[];
+  id?: number;
+  declaredAt?: string;
+}
+
+interface WinnerAnnouncement {
+  winner: {
+    userId: string;
+    username: string;
+    cartelaNumber: string;
+    winType: string;
+    winPattern?: number[];
+    prizeAmount?: number;
+    declaredAt: string;
+  };
+  gameInfo: {
+    sessionId: number;
+    sessionCode: string;
+    playerCount: number;
+    totalNumbersCalled?: number;
+  };
+  message: string;
+}
+
+interface WinnerHistoryItem {
+  id: number;
+  user_id: string;
+  username: string;
+  win_type: string;
+  win_pattern: any;
+  prize_amount: number;
+  declared_at: string;
+  cartela_number: string;
 }
 
 interface MultiplayerSession {
@@ -77,6 +109,7 @@ interface Player {
   username?: string;
   first_name?: string;
   player_status: string;
+  cartela_number?: string;
 }
 
 // Environment detection
@@ -248,10 +281,15 @@ export default function BingoGame() {
   const [countdown, setCountdown] = useState<number>(50);
   const [playersReady, setPlayersReady] = useState<Record<string, boolean>>({});
   
-  // Auto-call settings - NOW EVERYONE CAN AUTO-CALL
-  const [callInterval] = useState<number>(3000); // 3 seconds default
+  // NEW: Game ended state
+  const [gameEnded, setGameEnded] = useState(false);
+  const [winnerAnnouncement, setWinnerAnnouncement] = useState<WinnerAnnouncement | null>(null);
+  const [winnerHistory, setWinnerHistory] = useState<WinnerHistoryItem[]>([]);
+  
+  // Auto-call settings
+  const [callInterval] = useState<number>(3000);
   const [isAutoCalling, setIsAutoCalling] = useState<boolean>(false);
-  const [autoToggle, setAutoToggle] = useState(true); // For single player mode
+  const [autoToggle, setAutoToggle] = useState(true);
   
   // Audio settings
   const [isMuted, setIsMuted] = useState(false);
@@ -281,7 +319,7 @@ export default function BingoGame() {
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const autoCallIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const autoTimerRef = useRef<NodeJS.Timeout | null>(null); // For single player
+  const autoTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedRef = useRef(false);
 
   // ==================== INITIALIZATION ====================
@@ -294,7 +332,6 @@ export default function BingoGame() {
     const init = async () => {
       await fetchCurrentGame();
       
-      // Get multiplayer session info
       const storedSession = localStorage.getItem('multiplayerSession');
       if (storedSession) {
         try {
@@ -306,7 +343,6 @@ export default function BingoGame() {
         }
       }
       
-      // Initialize fallback audio for mobile
       if (typeof window !== 'undefined' && detectEnvironment() === 'mobile') {
         clickSoundRef.current = new Audio();
         clickSoundRef.current.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ';
@@ -325,7 +361,6 @@ export default function BingoGame() {
     init();
 
     return () => {
-      // Cleanup all intervals and timeouts
       if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
       if (autoCallIntervalRef.current) clearInterval(autoCallIntervalRef.current);
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
@@ -373,21 +408,100 @@ export default function BingoGame() {
 
   // ==================== MULTIPLAYER SYNC ====================
 
-  // Sync called numbers from server
-  const syncCalledNumbers = useCallback(async () => {
-    if (!multiplayerSession?.code) return;
-
+  // Fetch winner history
+  const fetchWinnerHistory = useCallback(async (sessionId: number) => {
     try {
-      setConnectionStatus('syncing');
-      
-      const response = await fetch(`/api/game/sessions?code=${multiplayerSession.code}&userId=${gameState?.user?.id}`);
+      const response = await fetch(`/api/game/declare-win?sessionId=${sessionId}`);
       const data = await response.json();
+      if (data.success && data.allWinners) {
+        setWinnerHistory(data.allWinners);
+      }
+    } catch (error) {
+      console.error('Failed to fetch winner history:', error);
+    }
+  }, []);
 
-      if (data.success && data.session) {
-        const serverCalled = data.session.calledNumbers || [];
-        setPlayers(data.players || []);
-        
-        // Update game status
+  // Sync called numbers from server
+// Replace your syncCalledNumbers function with this corrected version:
+
+const syncCalledNumbers = useCallback(async () => {
+  if (!multiplayerSession?.code) return;
+
+  try {
+    setConnectionStatus('syncing');
+    
+    const response = await fetch(`/api/game/sessions?code=${multiplayerSession.code}&userId=${gameState?.user?.id}`);
+    const data = await response.json();
+
+    if (data.success && data.session) {
+      const serverCalled = data.session.calledNumbers || [];
+      setPlayers(data.players || []);
+      
+      // CRITICAL FIX: Check if game has ended and show winner announcement for ALL non-winning players
+      if (data.session.isGameFinished || data.session.status === 'finished' || data.session.gameEndedAt) {
+        if (!gameEnded) {
+          console.log('🏁 Game has ended - showing winner announcement');
+          setGameEnded(true);
+          setGameStatus('finished');
+          stopAutoCalling();
+          
+          // Show winner announcement for ALL players (including winner, but we'll filter)
+          if (data.session.winner) {
+            // Check if current user is NOT the winner
+            const isCurrentUserWinner = data.session.winner.userId === gameState?.user?.id;
+            
+            if (!isCurrentUserWinner) {
+              // This is a non-winning player - show the winner announcement popup
+              console.log('📢 Showing winner announcement for non-winning player:', data.session.winner);
+              setWinnerAnnouncement({
+                winner: {
+                  userId: data.session.winner.userId,
+                  username: data.session.winner.username || 'Someone',
+                  cartelaNumber: data.session.winner.cartelaNumber || 'Unknown',
+                  winType: data.session.winner.winType || 'BINGO',
+                  prizeAmount: data.session.winner.prizeAmount,
+                  declaredAt: data.session.winner.declaredAt || new Date().toISOString()
+                },
+                gameInfo: {
+                  sessionId: data.session.id,
+                  sessionCode: data.session.code,
+                  playerCount: data.playerCount || players.length,
+                  totalNumbersCalled: data.session.totalNumbersCalled || called.length
+                },
+                message: `🏆 ${data.session.winner.username || 'Someone'} won with ${data.session.winner.winType || 'BINGO'}! 🏆`
+              });
+            } else {
+              // Current user IS the winner - their own win popup will show
+              console.log('👑 Current user is the winner - showing win popup instead');
+              // The winner's popup is already shown via declareWinToServer response
+            }
+            
+            // Fetch winner history for everyone
+            fetchWinnerHistory(data.session.id);
+          } else {
+            // No winner data but game ended - show generic message
+            console.log('Game ended but no winner data');
+            setWinnerAnnouncement({
+              winner: {
+                userId: '',
+                username: 'Someone',
+                cartelaNumber: 'Unknown',
+                winType: 'BINGO',
+                declaredAt: new Date().toISOString()
+              },
+              gameInfo: {
+                sessionId: data.session.id,
+                sessionCode: data.session.code,
+                playerCount: data.playerCount || players.length
+              },
+              message: `🏆 Game Over! Someone won! 🏆`
+            });
+          }
+        }
+      }
+      
+      // Update game status (only if not finished)
+      if (!data.session.isGameFinished && data.session.status !== 'finished' && !data.session.gameEndedAt) {
         const serverStatus = data.session.status;
         let newStatus: 'waiting' | 'countdown' | 'playing' | 'finished' = 'waiting';
         
@@ -396,12 +510,9 @@ export default function BingoGame() {
         } else if (serverStatus === 'countdown') {
           newStatus = 'countdown';
           setCountdown(data.session.countdownRemaining || 50);
-        } else if (serverStatus === 'finished') {
-          newStatus = 'finished';
-          stopAutoCalling();
         }
         
-        if (newStatus !== gameStatus) {
+        if (newStatus !== gameStatus && !gameEnded) {
           setGameStatus(newStatus);
           
           if (newStatus === 'playing' && gameStatus !== 'playing') {
@@ -411,40 +522,40 @@ export default function BingoGame() {
             }
           }
         }
+      }
+      
+      // Update player ready status
+      const readyState: Record<string, boolean> = {};
+      data.players?.forEach((p: Player) => {
+        readyState[p.user_id] = p.player_status === 'ready' || p.player_status === 'playing';
+      });
+      setPlayersReady(readyState);
+      
+      // Update called numbers if changed and game not ended
+      if (!gameEnded && JSON.stringify(serverCalled) !== JSON.stringify(syncedCalled)) {
+        console.log('Syncing called numbers from server:', serverCalled);
+        setCalled(serverCalled);
+        setSyncedCalled(serverCalled);
         
-        // Update player ready status
-        const readyState: Record<string, boolean> = {};
-        data.players?.forEach((p: Player) => {
-          readyState[p.user_id] = p.player_status === 'ready' || p.player_status === 'playing';
-        });
-        setPlayersReady(readyState);
-        
-        // Update called numbers if changed
-        if (JSON.stringify(serverCalled) !== JSON.stringify(syncedCalled)) {
-          console.log('Syncing called numbers from server:', serverCalled);
-          setCalled(serverCalled);
-          setSyncedCalled(serverCalled);
-          
-          if (serverCalled.length > 0) {
-            const newRecent = [...recentCalls];
-            const lastNum = serverCalled[serverCalled.length - 1];
-            const letter = getLetter(lastNum);
-            newRecent.unshift(`${letter}-${lastNum}`);
-            newRecent.pop();
-            setRecentCalls(newRecent);
-          }
-          
-          updateCardMatches(serverCalled);
+        if (serverCalled.length > 0) {
+          const newRecent = [...recentCalls];
+          const lastNum = serverCalled[serverCalled.length - 1];
+          const letter = getLetter(lastNum);
+          newRecent.unshift(`${letter}-${lastNum}`);
+          newRecent.pop();
+          setRecentCalls(newRecent);
         }
         
-        setConnectionStatus('connected');
+        updateCardMatches(serverCalled);
       }
-    } catch (error) {
-      console.error('Failed to sync called numbers:', error);
-      setConnectionStatus('disconnected');
+      
+      setConnectionStatus('connected');
     }
-  }, [multiplayerSession, gameState, gameStatus, syncedCalled, recentCalls, isMuted, isSpeechReady]);
-
+  } catch (error) {
+    console.error('Failed to sync called numbers:', error);
+    setConnectionStatus('disconnected');
+  }
+}, [multiplayerSession, gameState, gameStatus, syncedCalled, recentCalls, isMuted, isSpeechReady, gameEnded, fetchWinnerHistory, players.length, called.length]);
   // Start multiplayer sync
   useEffect(() => {
     if (!multiplayerSession?.code || !multiplayerSession?.sessionId) return;
@@ -466,7 +577,7 @@ export default function BingoGame() {
   // ==================== COUNTDOWN TIMER ====================
 
   useEffect(() => {
-    if (gameStatus === 'countdown' && countdown > 0) {
+    if (gameStatus === 'countdown' && countdown > 0 && !gameEnded) {
       countdownTimerRef.current = setInterval(() => {
         setCountdown(prev => {
           if (prev <= 1) {
@@ -477,7 +588,6 @@ export default function BingoGame() {
               speak("Game started! Numbers will be called automatically!");
             }
             
-            // Start auto-calling for everyone when game starts
             if (multiplayerSession) {
               startAutoCalling();
             }
@@ -494,13 +604,13 @@ export default function BingoGame() {
         }
       };
     }
-  }, [gameStatus, countdown, isMuted, isSpeechReady, multiplayerSession]);
+  }, [gameStatus, countdown, isMuted, isSpeechReady, multiplayerSession, gameEnded]);
 
-  // ==================== AUTO-CALLING LOGIC - EVERYONE CAN AUTO-CALL ====================
+  // ==================== AUTO-CALLING LOGIC ====================
 
   const startAutoCalling = useCallback(() => {
-    // In multiplayer, everyone can auto-call
-    // We just need to make sure we don't double-call the same number
+    if (gameEnded) return;
+    
     if (autoCallIntervalRef.current) {
       clearInterval(autoCallIntervalRef.current);
     }
@@ -509,13 +619,13 @@ export default function BingoGame() {
     console.log('🎮 Started auto-calling');
     
     autoCallIntervalRef.current = setInterval(() => {
-      if (gameStatus === 'playing' && !isWinner && called.length < 75) {
+      if (gameStatus === 'playing' && !isWinner && !gameEnded && called.length < 75) {
         autoCallNextNumber();
-      } else if (called.length >= 75) {
+      } else if (called.length >= 75 || gameEnded) {
         stopAutoCalling();
       }
     }, callInterval);
-  }, [gameStatus, isWinner, called.length, callInterval]);
+  }, [gameStatus, isWinner, called.length, callInterval, gameEnded]);
 
   const stopAutoCalling = useCallback(() => {
     if (autoCallIntervalRef.current) {
@@ -527,9 +637,8 @@ export default function BingoGame() {
   }, []);
 
   const autoCallNextNumber = useCallback(async () => {
-    if (isCallingRef.current || isWinner || gameStatus !== 'playing') return;
+    if (isCallingRef.current || isWinner || gameStatus !== 'playing' || gameEnded) return;
     
-    // Find all numbers that haven't been called yet
     const availableNumbers = [];
     for (let i = 1; i <= 75; i++) {
       if (!called.includes(i)) {
@@ -539,21 +648,20 @@ export default function BingoGame() {
     
     if (availableNumbers.length === 0) return;
     
-    // Pick a RANDOM number from available numbers
     const randomIndex = Math.floor(Math.random() * availableNumbers.length);
     const nextNumber = availableNumbers[randomIndex];
     
     console.log(`🎲 Auto-calling random number: ${nextNumber}`);
     await callNumber(nextNumber);
-  }, [called, isWinner, gameStatus]);
+  }, [called, isWinner, gameStatus, gameEnded]);
 
   // Handle auto toggle for single player
   useEffect(() => {
-    if (multiplayerSession) return; // Don't use this in multiplayer
+    if (multiplayerSession || gameEnded) return;
     
     if (autoToggle && !isWinner && gameStatus === 'playing') {
       autoTimerRef.current = setInterval(() => {
-        if (called.length >= 75 || isCallingRef.current || isWinner) {
+        if (called.length >= 75 || isCallingRef.current || isWinner || gameEnded) {
           if (called.length >= 75) {
             clearInterval(autoTimerRef.current!);
             setAutoToggle(false);
@@ -561,7 +669,6 @@ export default function BingoGame() {
           return;
         }
         
-        // Find random uncalled number
         let n;
         do {
           n = Math.floor(Math.random() * 75) + 1;
@@ -581,7 +688,7 @@ export default function BingoGame() {
         autoTimerRef.current = null;
       }
     }
-  }, [autoToggle, called, isWinner, multiplayerSession, gameStatus]);
+  }, [autoToggle, called, isWinner, multiplayerSession, gameStatus, gameEnded]);
 
   // ==================== API CALLS ====================
 
@@ -655,6 +762,7 @@ export default function BingoGame() {
         body: JSON.stringify({
           sessionId: multiplayerSession.sessionId,
           userId: gameState.user.id,
+          username: gameState.user.username,
           winType,
           pattern,
           calledNumbers: called,
@@ -665,14 +773,21 @@ export default function BingoGame() {
       const data = await response.json();
 
       if (data.success) {
-        console.log('Win declared successfully:', data);
+        console.log('🎉 Win declared successfully:', data);
         
         if (data.winDetails) {
           setWinDetails(data.winDetails);
+          setIsWinner(true);
+          setGameStatus('finished');
+          setGameEnded(true);
+          stopAutoCalling();
           
-          if (data.winDetails.isFirstWinner) {
-            setGameStatus('finished');
-            stopAutoCalling();
+          if (data.winnerAnnouncement) {
+            setWinnerAnnouncement(data.winnerAnnouncement);
+          }
+          
+          if (!isMuted && isSpeechReady) {
+            speak(`Congratulations! You won with ${winType}!`);
           }
         }
         
@@ -680,10 +795,29 @@ export default function BingoGame() {
       } else {
         console.log('Win declaration rejected:', data.message);
         
-        if (data.message?.includes('already won')) {
-          alert('Someone else already won this round!');
+        if (data.gameEnded || data.alreadyWon) {
           setGameStatus('finished');
+          setGameEnded(true);
           stopAutoCalling();
+          
+          if (data.winner) {
+            setWinnerAnnouncement({
+              winner: {
+                userId: data.winner.userId || '',
+                username: data.winner.username || 'Another player',
+                cartelaNumber: data.winner.cartelaNumber || 'Unknown',
+                winType: data.winner.winType || 'BINGO',
+                prizeAmount: data.winner.prizeAmount,
+                declaredAt: data.winner.declaredAt || new Date().toISOString()
+              },
+              gameInfo: {
+                sessionId: multiplayerSession.sessionId,
+                sessionCode: multiplayerSession.code,
+                playerCount: players.length
+              },
+              message: `🏆 ${data.winner.username || 'Another player'} won! Better luck next time! 🏆`
+            });
+          }
         }
         
         return false;
@@ -759,7 +893,7 @@ export default function BingoGame() {
 
   const updateCardMatches = (calledNumbers: number[]) => {
     setCardMatrix(prevMatrix => {
-      const newMatrix = JSON.parse(JSON.stringify(prevMatrix)); // Deep copy
+      const newMatrix = JSON.parse(JSON.stringify(prevMatrix));
       
       newMatrix.forEach((row: any[], rowIndex: number) => {
         row.forEach((cell: any, colIndex: number) => {
@@ -772,7 +906,6 @@ export default function BingoGame() {
         });
       });
       
-      // Check for win after updating matches
       setTimeout(() => {
         checkWin(newMatrix);
       }, 100);
@@ -917,6 +1050,12 @@ export default function BingoGame() {
   };
 
   const callNumber = async (num: number) => {
+    if (gameEnded || gameStatus === 'finished') {
+      console.log('Game has already ended');
+      alert('This game has already ended. Please join a new game.');
+      return;
+    }
+
     if (gameStatus !== 'playing') {
       console.log('Game has not started yet');
       if (gameStatus === 'countdown') {
@@ -948,12 +1087,10 @@ export default function BingoGame() {
         
         console.log(`✅ Number ${num} called successfully`);
         
-        // Server will sync via interval, but we can optimistically update
         if (result.calledNumbers) {
           setCalled(result.calledNumbers);
           updateCardMatches(result.calledNumbers);
           
-          // Update recent calls
           const letter = getLetter(num);
           setRecentCalls(prev => {
             const newRecent = [ `${letter}-${num}`, ...prev.slice(0, 2) ];
@@ -969,7 +1106,6 @@ export default function BingoGame() {
         isCallingRef.current = false;
       }
     } else {
-      // Single player mode
       isCallingRef.current = true;
       
       const newCalled = [...called, num];
@@ -983,7 +1119,7 @@ export default function BingoGame() {
         return newRecent;
       });
       
-      const newCardMatrix = JSON.parse(JSON.stringify(cardMatrix)); // Deep copy
+      const newCardMatrix = JSON.parse(JSON.stringify(cardMatrix));
       let cellUpdated = false;
       
       newCardMatrix.forEach((row: any[], rowIndex: number) => {
@@ -1011,6 +1147,8 @@ export default function BingoGame() {
   };
 
   const checkWin = (matrix: any[][] = cardMatrix): boolean => {
+    if (gameEnded) return false;
+    
     const wins: {
       type: string;
       cells: any[];
@@ -1083,11 +1221,10 @@ export default function BingoGame() {
       });
     }
     
-    if (wins.length > 0) {
+    if (wins.length > 0 && !gameEnded) {
       console.log('🎉 BINGO DETECTED!', wins);
       
-      // Mark winning cells
-      const newMatrix = JSON.parse(JSON.stringify(matrix)); // Deep copy
+      const newMatrix = JSON.parse(JSON.stringify(matrix));
       
       wins.forEach(win => {
         win.cells.forEach((winCell: any) => {
@@ -1107,7 +1244,6 @@ export default function BingoGame() {
       
       setCardMatrix(newMatrix);
       
-      // Stop auto-calling
       stopAutoCalling();
       setAutoToggle(false);
       if (autoTimerRef.current) {
@@ -1117,7 +1253,6 @@ export default function BingoGame() {
       
       setIsWinner(true);
       
-      // Speak win message
       const winTypes = wins.map(w => w.type).join(', ');
       const winMessage = `BINGO! ${winTypes.toUpperCase()}! Congratulations ${gameState?.user?.username || ''}!`;
       
@@ -1125,7 +1260,6 @@ export default function BingoGame() {
         speak(winMessage);
       }, 300);
       
-      // Declare win to server
       if (wins.length > 0 && multiplayerSession) {
         const firstWin = wins[0];
         declareWinToServer(firstWin.type, firstWin.pattern);
@@ -1186,6 +1320,9 @@ export default function BingoGame() {
     setCalled([]);
     setIsWinner(false);
     setWinDetails(null);
+    setGameEnded(false);
+    setWinnerAnnouncement(null);
+    setWinnerHistory([]);
     setRecentCalls(["—", "—", "—"]);
     
     stopAutoCalling();
@@ -1226,7 +1363,6 @@ export default function BingoGame() {
         });
       }
 
-      // Clear storage
       localStorage.removeItem('multiplayerSession');
       localStorage.removeItem('currentSession');
       localStorage.removeItem('currentBingoCardId');
@@ -1234,7 +1370,6 @@ export default function BingoGame() {
       localStorage.removeItem('cardNumber');
       localStorage.removeItem('bingoGameData');
 
-      // Cleanup
       if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
       if (autoCallIntervalRef.current) clearInterval(autoCallIntervalRef.current);
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
@@ -1250,6 +1385,11 @@ export default function BingoGame() {
   };
 
   const handleClassicGridClick = (num: number) => {
+    if (gameEnded || gameStatus === 'finished') {
+      alert('This game has already ended. Please join a new game.');
+      return;
+    }
+    
     if (gameStatus !== 'playing') {
       if (gameStatus === 'countdown') {
         alert(`Game starts in ${countdown} seconds. Please wait!`);
@@ -1259,13 +1399,16 @@ export default function BingoGame() {
       return;
     }
     
-    // EVERYONE can click and call numbers in multiplayer
     if (!called.includes(num) && !isWinner) {
       console.log(`👆 Player clicked number: ${num}`);
       callNumber(num);
     } else if (called.includes(num)) {
       console.log(`Number ${num} already called`);
     }
+  };
+
+  const handleContinueToLobby = () => {
+    window.location.href = '/game/lobby';
   };
 
   // ==================== RENDER HELPERS ====================
@@ -1292,7 +1435,6 @@ export default function BingoGame() {
         <div className="environment-badge telegram">
           <span className="badge-icon">📱</span>
           <span className="badge-text">Telegram</span>
-         
         </div>
       );
     } else if (environment === 'mobile') {
@@ -1357,6 +1499,196 @@ export default function BingoGame() {
     );
   };
 
+  // ==================== NEW POPUP COMPONENTS ====================
+
+  const WinnerAnnouncementPopup = () => {
+    if (!winnerAnnouncement) return null;
+    
+    return (
+      <div className="winner-announcement-overlay" style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.85)',
+        zIndex: 10000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        animation: 'fadeIn 0.5s ease'
+      }}>
+        <div className="winner-announcement-content" style={{
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          color: 'white',
+          padding: '40px',
+          borderRadius: '20px',
+          textAlign: 'center',
+          maxWidth: '500px',
+          width: '90%',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+          border: '4px solid gold',
+          animation: 'slideUp 0.5s ease'
+        }}>
+          <div style={{ fontSize: '60px', marginBottom: '20px' }}>🏆</div>
+          <h2 style={{ fontSize: '36px', marginBottom: '10px' }}>Game Over!</h2>
+          <div style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '20px' }}>
+            {winnerAnnouncement.message}
+          </div>
+          
+          <div style={{
+            background: 'rgba(255,255,255,0.2)',
+            padding: '20px',
+            borderRadius: '10px',
+            marginBottom: '20px'
+          }}>
+            <div style={{ fontSize: '20px', marginBottom: '10px' }}>
+              Winner: <strong>{winnerAnnouncement.winner.username}</strong>
+            </div>
+            <div style={{ fontSize: '18px', marginBottom: '10px' }}>
+              Cartela: <strong>#{winnerAnnouncement.winner.cartelaNumber}</strong>
+            </div>
+            <div style={{ fontSize: '18px', marginBottom: '10px' }}>
+              Pattern: <strong>{winnerAnnouncement.winner.winType}</strong>
+            </div>
+            {winnerAnnouncement.winner.prizeAmount && winnerAnnouncement.winner.prizeAmount > 0 && (
+              <div style={{ fontSize: '20px', color: 'gold' }}>
+                Prize: ${winnerAnnouncement.winner.prizeAmount.toFixed(2)}
+              </div>
+            )}
+          </div>
+
+          <div style={{
+            fontSize: '14px',
+            marginBottom: '20px',
+            opacity: 0.8
+          }}>
+            Game ID: {winnerAnnouncement.gameInfo.sessionCode}<br />
+            Players: {winnerAnnouncement.gameInfo.playerCount}
+          </div>
+
+          <button
+            onClick={handleContinueToLobby}
+            style={{
+              background: 'white',
+              color: '#764ba2',
+              border: 'none',
+              borderRadius: '10px',
+              padding: '12px 30px',
+              fontSize: '18px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              transition: 'transform 0.2s'
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+          >
+            Continue to Lobby
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const WinnerHistory = () => {
+    if (!gameEnded || winnerHistory.length === 0) return null;
+    
+    return (
+      <div className="winner-history" style={{
+        marginTop: '20px',
+        padding: '15px',
+        background: 'rgba(255,255,255,0.1)',
+        borderRadius: '10px'
+      }}>
+        <h3 style={{ marginBottom: '10px', color: '#fbbf24' }}>Game Results</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {winnerHistory.map((win, index) => (
+            <div key={win.id} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '10px',
+              background: 'rgba(0,0,0,0.2)',
+              borderRadius: '8px'
+            }}>
+              <span style={{ fontSize: '24px' }}>
+                {index === 0 ? '🥇' : '🥈'}
+              </span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 'bold' }}>{win.username}</div>
+                <div style={{ fontSize: '12px', opacity: 0.7 }}>
+                  Cartela #{win.cartela_number} • {win.win_type}
+                </div>
+              </div>
+              {win.prize_amount > 0 && (
+                <div style={{ color: 'gold', fontWeight: 'bold' }}>
+                  ${win.prize_amount}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const GameEndedOverlay = () => {
+    if (!gameEnded || isWinner || winnerAnnouncement) return null;
+    
+    return (
+      <div className="game-ended-overlay" style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.7)',
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        animation: 'fadeIn 0.5s ease'
+      }}>
+        <div style={{
+          background: '#1e293b',
+          color: 'white',
+          padding: '30px',
+          borderRadius: '15px',
+          textAlign: 'center',
+          maxWidth: '400px',
+          width: '90%'
+        }}>
+          <h2 style={{ color: '#fbbf24', marginBottom: '20px', fontSize: '28px' }}>Game Ended</h2>
+          <p style={{ marginBottom: '20px', fontSize: '16px' }}>
+            This game has finished. Please join a new game to continue playing.
+          </p>
+          
+          <WinnerHistory />
+          
+          <button
+            onClick={handleContinueToLobby}
+            style={{
+              background: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '12px 24px',
+              marginTop: '20px',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: 'bold',
+              transition: 'transform 0.2s'
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+          >
+            Join New Game
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   // ==================== LOADING STATES ====================
 
   if (loading) {
@@ -1409,7 +1741,7 @@ export default function BingoGame() {
 
   // ==================== MAIN RENDER ====================
 
-return (
+  return (
     <div className="bingo-container" onClick={() => {
       if (!userInteractedRef.current) {
         userInteractedRef.current = true;
@@ -1418,7 +1750,13 @@ return (
     }}>
       <MobileSoundPrompt />
       
-      {/* WIN POPUP */}
+      {/* Winner Announcement Popup (for non-winners) */}
+      <WinnerAnnouncementPopup />
+      
+      {/* Game Ended Overlay */}
+      <GameEndedOverlay />
+      
+      {/* WIN POPUP (for winner) */}
       {isWinner && (
         <div 
           className="flex-center"
@@ -1559,11 +1897,7 @@ return (
                 marginTop: '20px'
               }}>
                 <button
-                  onClick={() => {
-                    setIsWinner(false);
-                    setWinDetails(null);
-                    resetGame();
-                  }}
+                  onClick={resetGame}
                   style={{
                     background: '#3b82f6',
                     border: 'none',
@@ -1668,8 +2002,6 @@ return (
                '○ Disconnected'}
             </div>
 
-            
-
             {isAutoCalling && (
               <div style={{
                 background: 'rgba(34, 197, 94, 0.2)',
@@ -1682,11 +2014,21 @@ return (
                 🔊 Auto-calling Active
               </div>
             )}
+
+            {gameEnded && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.2)',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                color: '#ef4444',
+                border: '1px solid #ef4444',
+              }}>
+                🏁 Game Ended
+              </div>
+            )}
           </div>
         )}
-        
-        {/* Multiplayer Status & Countdown */}
-        
         
         {/* TOP STATS BAR */}
         <div className="stats-bar">
@@ -1696,7 +2038,7 @@ return (
           </div>
           
           <div className="stat-item">
-            <div>Card #</div>
+            <div>Card</div>
             <div className="stat-value">{gameState.bingoCard.cardNumber}</div>
           </div>
           
@@ -1712,8 +2054,8 @@ return (
           
           <div className="stat-item">
             <div>Status</div>
-            <div className="stat-value" style={{ color: isWinner ? '#22c55e' : '#f59e0b' }}>
-              {isWinner ? 'BINGO!' : gameStatus === 'playing' ? 'Playing' : 'Waiting'}
+            <div className="stat-value" style={{ color: isWinner ? '#22c55e' : gameEnded ? '#ef4444' : '#f59e0b' }}>
+              {isWinner ? 'BINGO!' : gameEnded ? 'Ended' : gameStatus === 'playing' ? 'Playing' : 'Waiting'}
             </div>
           </div>
         </div>
@@ -1734,17 +2076,19 @@ return (
                     className={`classic-grid-item ${called.includes(num) ? 'called' : ''}`}
                     onClick={() => handleClassicGridClick(num)}
                     title={
-                      gameStatus !== 'playing'
-                        ? gameStatus === 'countdown' 
-                          ? `Game starts in ${countdown}s` 
-                          : 'Waiting for game to start'
-                        : called.includes(num) 
-                          ? `Number ${num} already called` 
-                          : `Click to call number ${num}`
+                      gameEnded
+                        ? 'Game has ended'
+                        : gameStatus !== 'playing'
+                          ? gameStatus === 'countdown' 
+                            ? `Game starts in ${countdown}s` 
+                            : 'Waiting for game to start'
+                          : called.includes(num) 
+                            ? `Number ${num} already called` 
+                            : `Click to call number ${num}`
                     }
                     style={{
-                      opacity: gameStatus !== 'playing' ? 0.5 : 1,
-                      cursor: gameStatus !== 'playing' ? 'not-allowed' : 'pointer',
+                      opacity: (gameEnded || gameStatus !== 'playing') ? 0.5 : 1,
+                      cursor: (gameEnded || gameStatus !== 'playing') ? 'not-allowed' : 'pointer',
                       backgroundColor: called.includes(num) ? '#4ade80' : '',
                       color: called.includes(num) ? '#000' : ''
                     }}
@@ -1847,16 +2191,13 @@ return (
                 }
               </div>
 
-      
-              
-
               {/* CONTROLS */}
               <div className="controls" style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
                 {!multiplayerSession ? (
                   <button
                     className={`control-button ${autoToggle ? 'auto-button active' : 'auto-button'}`}
                     onClick={() => setAutoToggle(!autoToggle)}
-                    disabled={isWinner || gameStatus !== 'playing'}
+                    disabled={isWinner || gameStatus !== 'playing' || gameEnded}
                     title={autoToggle ? 'Stop automatic number calling' : 'Start automatic number calling'}
                   >
                     {autoToggle ? '⏹️ Auto' : '▶️ Auto'}
@@ -1871,7 +2212,7 @@ return (
                         startAutoCalling();
                       }
                     }}
-                    disabled={isWinner || gameStatus !== 'playing'}
+                    disabled={isWinner || gameStatus !== 'playing' || gameEnded}
                     title={isAutoCalling ? 'Stop auto-calling' : 'Start auto-calling random numbers'}
                   >
                     {isAutoCalling ? '⏹️ ' : '▶️'}
@@ -1882,7 +2223,7 @@ return (
                   className="control-button reset-button"
                   onClick={resetGame}
                   title="Reset the game"
-                  disabled={gameStatus === 'playing' && !isWinner}
+                  disabled={gameStatus === 'playing' && !isWinner && !gameEnded}
                 >
                   🔄 
                 </button>
@@ -1908,9 +2249,11 @@ return (
                   onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
                 >
                   <span>🚪</span>
-                 
                 </button>
               </div>
+
+              {/* Winner History (if game ended) */}
+              {gameEnded && !isWinner && !winnerAnnouncement && <WinnerHistory />}
 
               {/* BINGO CARD SECTION */}
               <div className="flex-column flex-1 min-height-0 overflow-hidden">
@@ -1922,20 +2265,23 @@ return (
                       <div
                         key={`${rowIndex}-${colIndex}`}
                         className={`bingo-cell ${cell.isMatch ? 'matched' : ''} ${cell.isWin ? 'winning' : ''}`}
-                        onClick={() => cell.num && handleClassicGridClick(cell.num)}
+                        onClick={() => cell.num && !gameEnded && handleClassicGridClick(cell.num)}
                         title={
-                          cell.isMatch 
-                            ? `${cell.text} - Matched!` 
-                            : cell.isWin 
-                            ? 'Winning cell!' 
-                            : cell.text === 'FREE' 
-                            ? 'Free space' 
-                            : `Click to mark number ${cell.num}`
+                          gameEnded
+                            ? 'Game has ended'
+                            : cell.isMatch 
+                              ? `${cell.text} - Matched!` 
+                              : cell.isWin 
+                              ? 'Winning cell!' 
+                              : cell.text === 'FREE' 
+                              ? 'Free space' 
+                              : `Click to mark number ${cell.num}`
                         }
                         style={{
                           backgroundColor: cell.isWin ? '#fbbf24' : cell.isMatch ? '#4ade80' : '',
                           border: cell.isWin ? '3px solid #f59e0b' : '',
-                          cursor: cell.num ? 'pointer' : 'default'
+                          cursor: (cell.num && !gameEnded) ? 'pointer' : 'default',
+                          opacity: gameEnded ? 0.7 : 1
                         }}
                       >
                         {cell.text}
@@ -1948,6 +2294,30 @@ return (
           </div>
         </div>
       </div>
+
+      {/* Add CSS animations */}
+      <style jsx>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+          from {
+            transform: translateY(50px);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-20px); }
+        }
+      `}</style>
     </div>
   );
 }
