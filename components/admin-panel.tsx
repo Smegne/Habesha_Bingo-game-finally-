@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useGameStore } from "@/lib/game-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -46,15 +46,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
-  BarChart3,
-  PieChart,
-  TrendingUp,
-  TrendingDown,
-  Calendar,
-  Download,
-  Upload,
-  Filter,
-  MoreVertical,
   ChevronLeft,
   ChevronRight,
   Search,
@@ -64,15 +55,12 @@ import {
   Wallet,
   Gamepad2,
   Trophy,
-  History,
   Settings,
   LogOut,
   Home,
   BarChart,
   FileText,
   Bell,
-  UserPlus,
-  UserMinus,
   CheckCircle,
   XCircle,
   Clock,
@@ -80,22 +68,18 @@ import {
   Shield,
   Eye,
   Edit,
-  Trash2,
   RefreshCw,
-  Plus,
   X,
   Menu,
-  Activity,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
   ArrowUpRight,
   ArrowDownRight,
   Check,
   Ban,
   AlertCircle,
   Loader2,
+  Download,
+  Filter,
 } from "lucide-react"
-import { format } from "date-fns"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -109,11 +93,9 @@ import {
   Tooltip as RechartsTooltip,
   Legend,
   ResponsiveContainer,
-  PieChart as RechartsPieChart,
-  Pie,
-  Cell,
   LineChart,
   Line,
+  Cell,
 } from "recharts"
 
 // Sidebar Navigation Items
@@ -137,8 +119,6 @@ const CHART_COLORS = {
   danger: "#ef4444",
   info: "#06b6d4",
   purple: "#8b5cf6",
-  pink: "#ec4899",
-  indigo: "#6366f1",
 }
 
 // Types
@@ -168,7 +148,6 @@ interface User {
   first_name: string;
   email: string | null;
   phone: string | null;
-  password_hash?: string;
   role: string;
   balance: string;
   bonus_balance: string;
@@ -203,21 +182,46 @@ interface Deposit {
   };
 }
 
+interface Withdrawal {
+  id: string;
+  user_id: string;
+  amount: number;
+  method: string;
+  status: string;
+  created_at: string;
+  user?: {
+    username: string;
+    first_name: string;
+  };
+}
+
+interface Transaction {
+  id: string;
+  user_id: string;
+  type: string;
+  amount: number;
+  status: string;
+  created_at: string;
+}
+
+interface Game {
+  id: string;
+  name: string;
+  status: string;
+  players: number;
+  created_at: string;
+}
+
 export function AdminPanelEnhanced() {
   console.log('AdminPanelEnhanced component rendering');
   
   const { 
     user, 
     logout, 
-    allUsers, 
-    deposits, 
-    withdrawals, 
-    transactions, 
-    approvalLogs, 
-    completedGames,
-    activePlayers,
-    gamesPlayed,
-    dailyWinners,
+    allUsers = [], 
+    deposits = [], 
+    withdrawals = [], 
+    transactions = [], 
     fetchAdminData,
   } = useGameStore()
 
@@ -233,19 +237,18 @@ export function AdminPanelEnhanced() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [showUserDetails, setShowUserDetails] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [notes, setNotes] = useState("")
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [dateRange, setDateRange] = useState({ start: "", end: "" })
   const [currentPage, setCurrentPage] = useState(1)
-  const [itemsPerPage, setItemsPerPage] = useState(20)
+  const [itemsPerPage] = useState(20)
   const [lastPollTime, setLastPollTime] = useState<Date | null>(null)
   
-  // New state for fetched users data
+  // Data states with default empty arrays
   const [usersData, setUsersData] = useState<User[]>([])
   const [depositsData, setDepositsData] = useState<Deposit[]>([])
-  const [withdrawalsData, setWithdrawalsData] = useState<any[]>([])
-  const [transactionsData, setTransactionsData] = useState<any[]>([])
-  const [gamesData, setGamesData] = useState<any[]>([])
+  const [withdrawalsData, setWithdrawalsData] = useState<Withdrawal[]>([])
+  const [transactionsData, setTransactionsData] = useState<Transaction[]>([])
+  const [gamesData, setGamesData] = useState<Game[]>([])
   const [analyticsData, setAnalyticsData] = useState<any>(null)
   
   // Deposit specific states
@@ -257,7 +260,67 @@ export function AdminPanelEnhanced() {
 
   console.log('Dashboard stats state:', dashboardStats);
 
-  // POLLING SETUP - REPLACES WEBSOCKET
+  // Safe calculations with fallbacks
+  const pendingDeposits = useMemo(() => 
+    Array.isArray(depositsData) ? depositsData.filter(d => d.status === 'pending') : [], 
+    [depositsData]
+  )
+  
+  const pendingWithdrawals = useMemo(() => 
+    Array.isArray(withdrawals) ? withdrawals.filter((w: any) => w.status === 'pending') : [], 
+    [withdrawals]
+  )
+  
+  const onlineUsers = useMemo(() => 
+    Array.isArray(allUsers) ? allUsers.filter((u: any) => u.is_online) : [], 
+    [allUsers]
+  )
+  
+  const adminUsers = useMemo(() => 
+    Array.isArray(allUsers) ? allUsers.filter((u: any) => u.role === 'admin') : [], 
+    [allUsers]
+  )
+  
+  const totalDeposits = useMemo(() => 
+    Array.isArray(deposits) 
+      ? deposits.reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0) 
+      : 0, 
+    [deposits]
+  )
+  
+  const totalWithdrawals = useMemo(() => 
+    Array.isArray(withdrawals) 
+      ? withdrawals.reduce((sum: number, w: any) => sum + (Number(w.amount) || 0), 0) 
+      : 0, 
+    [withdrawals]
+  )
+  
+  const totalRevenue = totalDeposits - totalWithdrawals
+
+  // Filtered deposits with safe checks
+  const filteredDeposits = useMemo(() => {
+    if (!Array.isArray(depositsData)) return []
+    
+    return depositsData.filter(deposit => {
+      // Apply status filter
+      if (depositStatusFilter !== 'all' && deposit.status !== depositStatusFilter) {
+        return false
+      }
+      
+      // Apply search filter
+      if (!searchQuery) return true
+      
+      const query = searchQuery.toLowerCase()
+      return (
+        deposit.user?.username?.toLowerCase().includes(query) ||
+        deposit.user?.first_name?.toLowerCase().includes(query) ||
+        deposit.transaction_id?.toLowerCase().includes(query) ||
+        deposit.method.toLowerCase().includes(query)
+      )
+    })
+  }, [depositsData, depositStatusFilter, searchQuery])
+
+  // POLLING SETUP
   useEffect(() => {
     console.log('AdminPanel: Setting up polling for real-time updates');
     
@@ -271,7 +334,7 @@ export function AdminPanelEnhanced() {
         console.log('Polling: Checking for updates...');
         
         // Track previous pending counts for notifications
-        const prevPendingDeposits = depositsData.filter(d => d.status === 'pending').length;
+        const prevPendingCount = pendingDeposits.length;
         
         // Fetch latest stats based on active tab
         switch (activeNav) {
@@ -282,9 +345,11 @@ export function AdminPanelEnhanced() {
           case 'deposits':
             await fetchDepositsData();
             // Check for new pending deposits
-            const newPendingCount = depositsData.filter(d => d.status === 'pending').length;
-            if (newPendingCount > prevPendingDeposits) {
-              toast.info(`${newPendingCount - prevPendingDeposits} new pending deposit(s)`, {
+            const newPendingCount = Array.isArray(depositsData) 
+              ? depositsData.filter(d => d.status === 'pending').length 
+              : 0;
+            if (newPendingCount > prevPendingCount) {
+              toast.info(`${newPendingCount - prevPendingCount} new pending deposit(s)`, {
                 description: 'New deposits waiting for approval',
                 duration: 5000,
               });
@@ -323,28 +388,23 @@ export function AdminPanelEnhanced() {
     // Initial poll
     pollForUpdates();
 
-    // Set up polling interval (every 15 seconds for active tabs, 30 for background)
+    // Set up polling interval
     const setupPolling = () => {
       const isTabActive = !document.hidden;
       const intervalTime = isTabActive ? 15000 : 30000; // 15s active, 30s background
-      
-      console.log(`Polling interval set to ${intervalTime}ms (${isTabActive ? 'active' : 'background'} tab)`);
       
       if (pollInterval) clearInterval(pollInterval);
       pollInterval = setInterval(pollForUpdates, intervalTime);
     };
 
-    // Initial setup
     setupPolling();
 
-    // Handle visibility change (reduce polling when tab is inactive)
     const handleVisibilityChange = () => {
       setupPolling();
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Cleanup
     return () => {
       console.log('AdminPanel: Cleaning up polling');
       isActive = false;
@@ -353,15 +413,245 @@ export function AdminPanelEnhanced() {
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [activeNav]); // Re-run when activeNav changes
+  }, [activeNav]);
 
-  // Update the handleNavClick function
-  const handleNavClick = (navId: string) => {
+  // Fetch dashboard data
+  const fetchDashboardData = useCallback(async () => {
+    console.log('fetchDashboardData: Starting');
+    try {
+      setIsLoading(true)
+      const stats = await ClientAdminService.getDashboardStats()
+      console.log('fetchDashboardData: Success', stats)
+      setDashboardStats(stats)
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error)
+      toast.error('Failed to load dashboard data')
+      // Fallback mock data
+      setDashboardStats({
+        total_users: 1250,
+        active_users: 87,
+        total_admins: 3,
+        total_revenue: 125000,
+        pending_actions: 14,
+        games_played: 5230,
+        active_games: 8,
+        daily_winners: 45,
+        total_deposits_amount: 250000,
+        total_withdrawals_amount: 125000,
+        user_growth: 12.5,
+        revenue_growth: 8.3,
+      })
+    } finally {
+      console.log('fetchDashboardData: Finished')
+      setIsLoading(false)
+    }
+  }, [])
+
+  // Fetch users data
+  const fetchUsersData = useCallback(async () => {
+    console.log('=== FETCH USERS START ===');
+    try {
+      setIsLoading(true);
+      
+      const url = `/api/admin/working-users?page=${currentPage}&limit=${itemsPerPage}`;
+      const response = await fetch(url);
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        const users = data.data.users || [];
+        setUsersData(users);
+        toast.success(`Loaded ${users.length} users`);
+      } else {
+        setUsersData([]);
+        toast.error('Failed to load users');
+      }
+    } catch (error) {
+      console.error('Fetch error:', error);
+      setUsersData([]);
+      toast.error('Failed to load users');
+    } finally {
+      setIsLoading(false);
+      console.log('=== FETCH USERS END ===');
+    }
+  }, [currentPage, itemsPerPage]);
+
+  // Fetch deposits data
+  const fetchDepositsData = useCallback(async () => {
+    console.log('=== FETCH DEPOSITS START ===');
+    try {
+      setIsLoading(true);
+      
+      const url = `/api/admin/working-data?type=deposits&page=${currentPage}&limit=${itemsPerPage}&status=${depositStatusFilter}`;
+      const response = await fetch(url);
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        const deposits = data.data.deposits || [];
+        
+        // Format deposits safely
+        const formattedDeposits = deposits.map((deposit: any) => ({
+          id: deposit.id || '',
+          user_id: deposit.user_id || '',
+          amount: typeof deposit.amount === 'string' ? parseFloat(deposit.amount) : (deposit.amount || 0),
+          method: deposit.method || 'telebirr',
+          status: deposit.status || 'pending',
+          transaction_id: deposit.transaction_ref || deposit.transaction_id,
+          proof_image: deposit.screenshot_url || deposit.proof_image,
+          admin_notes: deposit.admin_notes,
+          approved_by: deposit.approved_by,
+          approved_at: deposit.approved_at,
+          created_at: deposit.created_at || new Date().toISOString(),
+          updated_at: deposit.updated_at || new Date().toISOString(),
+          user: {
+            username: deposit.username || 'Unknown',
+            first_name: deposit.first_name || 'User',
+            telegram_id: deposit.telegram_id || 'N/A',
+            balance: typeof deposit.user_balance === 'string' ? parseFloat(deposit.user_balance) : (deposit.user_balance || 0)
+          }
+        }));
+        
+        setDepositsData(formattedDeposits);
+        
+        if (formattedDeposits.length > 0) {
+          toast.success(`Loaded ${formattedDeposits.length} deposits`);
+        }
+      } else {
+        setDepositsData([]);
+      }
+    } catch (error: any) {
+      console.error('Fetch error:', error);
+      setDepositsData([]);
+      toast.error(`Failed to load deposits: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+      console.log('=== FETCH DEPOSITS END ===');
+    }
+  }, [currentPage, itemsPerPage, depositStatusFilter]);
+
+  // Fetch withdrawals data
+  const fetchWithdrawalsData = useCallback(async () => {
+    console.log('=== FETCH WITHDRAWALS START ===');
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/admin/working-data?type=withdrawals&page=${currentPage}&limit=${itemsPerPage}`);
+      
+      if (!response.ok) throw new Error(`Failed: ${response.status}`);
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        const withdrawals = data.data?.withdrawals || [];
+        setWithdrawalsData(withdrawals);
+        toast.success(`Loaded ${withdrawals.length} withdrawals`);
+      } else {
+        setWithdrawalsData([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch withdrawals:', error);
+      setWithdrawalsData([]);
+      toast.error('Failed to load withdrawals');
+    } finally {
+      setIsLoading(false);
+      console.log('=== FETCH WITHDRAWALS END ===');
+    }
+  }, [currentPage, itemsPerPage]);
+
+  // Fetch transactions data
+  const fetchTransactionsData = useCallback(async () => {
+    console.log('=== FETCH TRANSACTIONS START ===');
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/admin/working-data?type=transactions&page=${currentPage}&limit=${itemsPerPage}`);
+      
+      if (!response.ok) throw new Error(`Failed: ${response.status}`);
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        const transactions = data.data?.transactions || [];
+        setTransactionsData(transactions);
+        toast.success(`Loaded ${transactions.length} transactions`);
+      } else {
+        setTransactionsData([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch transactions:', error);
+      setTransactionsData([]);
+      toast.error('Failed to load transactions');
+    } finally {
+      setIsLoading(false);
+      console.log('=== FETCH TRANSACTIONS END ===');
+    }
+  }, [currentPage, itemsPerPage]);
+
+  // Fetch games data
+  const fetchGamesData = useCallback(async () => {
+    console.log('=== FETCH GAMES START ===');
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/admin/working-data?type=games&page=${currentPage}&limit=${itemsPerPage}`);
+      
+      if (!response.ok) throw new Error(`Failed: ${response.status}`);
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        const games = data.data?.games || [];
+        setGamesData(games);
+        toast.success(`Loaded ${games.length} games`);
+      } else {
+        setGamesData([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch games:', error);
+      setGamesData([]);
+      toast.error('Failed to load games');
+    } finally {
+      setIsLoading(false);
+      console.log('=== FETCH GAMES END ===');
+    }
+  }, [currentPage, itemsPerPage]);
+
+  // Fetch analytics data
+  const fetchAnalyticsData = useCallback(async () => {
+    console.log('=== FETCH ANALYTICS START ===');
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/admin/analytics`);
+      
+      if (!response.ok) throw new Error(`Failed: ${response.status}`);
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setAnalyticsData(data.data);
+        toast.success('Analytics data loaded');
+      } else {
+        setAnalyticsData(null);
+      }
+    } catch (error) {
+      console.error('Failed to fetch analytics:', error);
+      setAnalyticsData(null);
+      toast.error('Failed to load analytics');
+    } finally {
+      setIsLoading(false);
+      console.log('=== FETCH ANALYTICS END ===');
+    }
+  }, []);
+
+  // Handle navigation click
+  const handleNavClick = useCallback((navId: string) => {
     console.log('Nav clicked:', navId);
     setActiveNav(navId);
     setIsMobileMenuOpen(false);
     
-    // Immediate fetch when switching tabs (don't wait for polling)
+    // Fetch data based on selected nav
     switch (navId) {
       case 'dashboard':
         fetchDashboardData();
@@ -385,510 +675,17 @@ export function AdminPanelEnhanced() {
         fetchAnalyticsData();
         break;
     }
-  };
+  }, [fetchDashboardData, fetchUsersData, fetchDepositsData, fetchWithdrawalsData, fetchGamesData, fetchTransactionsData, fetchAnalyticsData]);
 
-  // Fetch dashboard data
-  const fetchDashboardData = async () => {
-    console.log('fetchDashboardData: Starting');
-    try {
-      setIsLoading(true)
-      // Use ClientAdminService instead of AdminService
-      const stats = await ClientAdminService.getDashboardStats()
-      console.log('fetchDashboardData: Success', stats)
-      setDashboardStats(stats)
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error)
-      toast.error('Failed to load dashboard data')
-      // Add fallback mock data
-      setDashboardStats({
-        total_users: 1250,
-        active_users: 87,
-        total_admins: 3,
-        total_revenue: 125000,
-        pending_actions: 14,
-        games_played: 5230,
-        active_games: 8,
-        daily_winners: 45,
-        total_deposits_amount: 250000,
-        total_withdrawals_amount: 125000,
-        user_growth: 12.5,
-        revenue_growth: 8.3,
-      })
-    } finally {
-      console.log('fetchDashboardData: Finished')
-      setIsLoading(false)
-    }
-  }
-
-  // Fetch users data
-  const fetchUsersData = async () => {
-    console.log('=== FETCH USERS START ===');
-    try {
-      setIsLoading(true);
-      
-      // Use the GUARANTEED working API
-      const url = `/api/admin/working-users?page=${currentPage}&limit=${itemsPerPage}`;
-      console.log('Fetching from:', url);
-      
-      const response = await fetch(url);
-      console.log('Response status:', response.status);
-      
-      const data = await response.json();
-      console.log('Response data success:', data.success);
-      console.log('Users count:', data.data?.users?.length || 0);
-      
-      if (data.success && data.data) {
-        const users = data.data.users || [];
-        console.log('Setting users data:', users.length, 'users');
-        console.log('First user:', users[0]);
-        setUsersData(users);
-        toast.success(`Loaded ${users.length} users`);
-      } else {
-        console.error('API returned failure');
-        toast.error('Failed to load users');
-      }
-    } catch (error) {
-      console.error('Fetch error:', error);
-      toast.error('Failed to load users');
-    } finally {
-      setIsLoading(false);
-      console.log('=== FETCH USERS END ===');
-    }
-  };
-
-  // Fetch deposits data
-  const fetchDepositsData = async () => {
-    console.log('=== FETCH DEPOSITS START ===');
-    try {
-      setIsLoading(true);
-      
-      const url = `/api/admin/working-data?type=deposits&page=${currentPage}&limit=${itemsPerPage}&status=${depositStatusFilter}`;
-      console.log('Fetching from:', url);
-      
-      const response = await fetch(url);
-      console.log('Response status:', response.status);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      console.log('API response success:', data.success);
-      console.log('Full data:', data);
-      
-      if (data.success && data.data) {
-        const deposits = data.data.deposits || [];
-        console.log('Raw deposits received:', deposits);
-        
-        // Map to your frontend interface
-        const formattedDeposits = deposits.map((deposit: any) => {
-          console.log('Processing deposit:', deposit.id);
-          
-          return {
-            id: deposit.id,
-            user_id: deposit.user_id,
-            amount: typeof deposit.amount === 'string' ? parseFloat(deposit.amount) : deposit.amount,
-            method: deposit.method || 'telebirr',
-            status: deposit.status || 'pending',
-            transaction_id: deposit.transaction_ref || deposit.transaction_id,
-            proof_image: deposit.screenshot_url || deposit.proof_image,
-            admin_notes: deposit.admin_notes,
-            approved_by: deposit.approved_by,
-            approved_at: deposit.approved_at,
-            created_at: deposit.created_at,
-            updated_at: deposit.updated_at,
-            user: {
-              username: deposit.username || 'Unknown',
-              first_name: deposit.first_name || 'User',
-              telegram_id: deposit.telegram_id || 'N/A',
-              balance: typeof deposit.user_balance === 'string' ? parseFloat(deposit.user_balance) : deposit.user_balance
-            }
-          };
-        });
-        
-        console.log('Formatted deposits:', formattedDeposits);
-        setDepositsData(formattedDeposits);
-        
-        if (formattedDeposits.length > 0) {
-          toast.success(`Loaded ${formattedDeposits.length} deposits`);
-        } else {
-          toast.info('No deposits found');
-        }
-      } else {
-        console.error('API returned failure:', data);
-        toast.error(data.message || 'Failed to load deposits');
-      }
-    } catch (error: any) {
-      console.error('Fetch error:', error);
-      toast.error(`Failed to load deposits: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-      console.log('=== FETCH DEPOSITS END ===');
-    }
-  };
-
-  // Approve deposit
-  const handleApproveDeposit = async (depositId: string) => {
-    console.log('=== APPROVE DEPOSIT ===');
+  // Handle refresh
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
     
-    const deposit = depositsData.find(d => d.id === depositId);
-    if (!deposit) {
-      toast.error('Deposit not found');
-      return;
-    }
-    
-    if (!confirm(`Approve ${deposit.amount} ETB deposit from ${deposit.user?.username}?`)) {
-      return;
-    }
-
     try {
-      setIsProcessingDeposit(true);
-      
-      const payload = {
-        action: 'approve',
-        type: 'deposits',
-        ids: [depositId]
-      };
-      
-      console.log('Sending payload:', payload);
-      
-      const response = await fetch('/api/admin/working-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      console.log('Response status:', response.status);
-      
-      const data = await response.json();
-      console.log('Response data:', data);
-      
-      if (data.success) {
-        toast.success('✅ Deposit approved successfully!');
-        
-        // Update UI
-        setDepositsData(prev => prev.map(d => {
-          if (d.id === depositId) {
-            return {
-              ...d,
-              status: 'approved',
-              approved_by: 'admin',
-              approved_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            };
-          }
-          return d;
-        }));
-        
-        // Refresh list
-        setTimeout(() => fetchDepositsData(), 1000);
-        
-        // Refresh dashboard
-        fetchDashboardData();
-        
-      } else {
-        console.error('Approve failed:', data);
-        toast.error(data.message || 'Failed to approve deposit');
-      }
-      
-    } catch (error: any) {
-      console.error('Error:', error);
-      toast.error(`Error: ${error.message}`);
-    } finally {
-      setIsProcessingDeposit(false);
-    }
-  };
-
-  // Reject deposit
-  const handleRejectDeposit = async (depositId: string, reason: string = '') => {
-    if (!reason.trim()) {
-      toast.error('Please provide a reason for rejection');
-      return;
-    }
-
-    if (!confirm('Are you sure you want to reject this deposit?')) {
-      return;
-    }
-
-    try {
-      setIsProcessingDeposit(true);
-      console.log('Rejecting deposit:', depositId);
-
-      const response = await fetch('/api/admin/working-data', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'reject',
-          type: 'deposits',
-          ids: [depositId],
-          admin_notes: reason,
-        }),
-      });
-
-      const data = await response.json();
-      console.log('Reject response:', data);
-
-      if (data.success) {
-        toast.success('Deposit rejected successfully!');
-        // Update the deposit status in the list
-        setDepositsData(prev => prev.map(deposit =>
-          deposit.id === depositId ? { ...deposit, status: 'rejected' } : deposit
-        ));
-        setRejectReason('');
-        // Refresh dashboard stats
-        fetchDashboardData();
-      } else {
-        toast.error(data.message || 'Failed to reject deposit');
-      }
-    } catch (error) {
-      console.error('Error rejecting deposit:', error);
-      toast.error('Failed to reject deposit');
-    } finally {
-      setIsProcessingDeposit(false);
-      setShowDepositDetails(false);
-    }
-  };
-
-  // Bulk approve deposits
-  const handleBulkApproveDeposits = async () => {
-    if (selectedItems.length === 0) {
-      toast.warning('No deposits selected');
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to approve ${selectedItems.length} deposits?`)) {
-      return;
-    }
-
-    try {
-      setIsProcessingDeposit(true);
-      const response = await fetch('/api/admin/deposits/bulk-approve', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          deposit_ids: selectedItems,
-          admin_notes: 'Bulk approved by admin',
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        toast.success(`${selectedItems.length} deposits approved successfully!`);
-        // Refresh deposits list
-        fetchDepositsData();
-        // Refresh dashboard stats
-        fetchDashboardData();
-        // Clear selection
-        setSelectedItems([]);
-      } else {
-        toast.error(data.message || 'Failed to approve deposits');
-      }
-    } catch (error) {
-      console.error('Error bulk approving deposits:', error);
-      toast.error('Failed to approve deposits');
-    } finally {
-      setIsProcessingDeposit(false);
-    }
-  };
-
-  // Bulk reject deposits
-  const handleBulkRejectDeposits = async () => {
-    if (selectedItems.length === 0) {
-      toast.warning('No deposits selected');
-      return;
-    }
-
-    if (!rejectReason.trim()) {
-      toast.error('Please provide a reason for rejection');
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to reject ${selectedItems.length} deposits?`)) {
-      return;
-    }
-
-    try {
-      setIsProcessingDeposit(true);
-      const response = await fetch('/api/admin/deposits/bulk-reject', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          deposit_ids: selectedItems,
-          admin_notes: rejectReason,
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        toast.success(`${selectedItems.length} deposits rejected successfully!`);
-        // Refresh deposits list
-        fetchDepositsData();
-        // Refresh dashboard stats
-        fetchDashboardData();
-        // Clear selection and reason
-        setSelectedItems([]);
-        setRejectReason('');
-      } else {
-        toast.error(data.message || 'Failed to reject deposits');
-      }
-    } catch (error) {
-      console.error('Error bulk rejecting deposits:', error);
-      toast.error('Failed to reject deposits');
-    } finally {
-      setIsProcessingDeposit(false);
-    }
-  };
-
-  // View deposit details
-  const handleViewDepositDetails = (deposit: Deposit) => {
-    setSelectedDeposit(deposit);
-    setShowDepositDetails(true);
-  };
-
-  // Filter deposits based on search and status
-  const filteredDeposits = depositsData.filter(deposit => {
-    // Apply status filter
-    if (depositStatusFilter !== 'all' && deposit.status !== depositStatusFilter) {
-      return false;
-    }
-    
-    // Apply search filter
-    if (!searchQuery) return true;
-    
-    const query = searchQuery.toLowerCase();
-    return (
-      deposit.user?.username?.toLowerCase().includes(query) ||
-      deposit.user?.first_name?.toLowerCase().includes(query) ||
-      deposit.transaction_id?.toLowerCase().includes(query) ||
-      deposit.method.toLowerCase().includes(query)
-    );
-  });
-
-  const fetchWithdrawalsData = async () => {
-    console.log('=== FETCH WITHDRAWALS START ===');
-    try {
-      setIsLoading(true);
-      const response = await fetch(`/api/admin/working-data?type=withdrawals&page=${currentPage}&limit=${itemsPerPage}`);
-      
-      if (!response.ok) throw new Error(`Failed: ${response.status}`);
-      
-      const data = await response.json();
-      console.log('Withdrawals data response:', data);
-      
-      if (data.success) {
-        const withdrawals = data.data?.withdrawals || [];
-        setWithdrawalsData(withdrawals);
-        toast.success(`Loaded ${withdrawals.length} withdrawals`);
-      } else {
-        toast.error('Failed to load withdrawals');
-      }
-    } catch (error) {
-      console.error('Failed to fetch withdrawals:', error);
-      toast.error('Failed to load withdrawals');
-    } finally {
-      setIsLoading(false);
-      console.log('=== FETCH WITHDRAWALS END ===');
-    }
-  };
-
-  const fetchTransactionsData = async () => {
-    console.log('=== FETCH TRANSACTIONS START ===');
-    try {
-      setIsLoading(true);
-      const response = await fetch(`/api/admin/working-data?type=transactions&page=${currentPage}&limit=${itemsPerPage}`);
-      
-      if (!response.ok) throw new Error(`Failed: ${response.status}`);
-      
-      const data = await response.json();
-      console.log('Transactions data response:', data);
-      
-      if (data.success) {
-        const transactions = data.data?.transactions || [];
-        setTransactionsData(transactions);
-        toast.success(`Loaded ${transactions.length} transactions`);
-      } else {
-        toast.error('Failed to load transactions');
-      }
-    } catch (error) {
-      console.error('Failed to fetch transactions:', error);
-      toast.error('Failed to load transactions');
-    } finally {
-      setIsLoading(false);
-      console.log('=== FETCH TRANSACTIONS END ===');
-    }
-  };
-
-  const fetchGamesData = async () => {
-    console.log('=== FETCH GAMES START ===');
-    try {
-      setIsLoading(true);
-      const response = await fetch(`/api/admin/working-data?type=games&page=${currentPage}&limit=${itemsPerPage}`);
-      
-      if (!response.ok) throw new Error(`Failed: ${response.status}`);
-      
-      const data = await response.json();
-      console.log('Games data response:', data);
-      
-      if (data.success) {
-        const games = data.data?.games || [];
-        setGamesData(games);
-        toast.success(`Loaded ${games.length} games`);
-      } else {
-        toast.error('Failed to load games');
-      }
-    } catch (error) {
-      console.error('Failed to fetch games:', error);
-      toast.error('Failed to load games');
-    } finally {
-      setIsLoading(false);
-      console.log('=== FETCH GAMES END ===');
-    }
-  };
-
-  const fetchAnalyticsData = async () => {
-    console.log('=== FETCH ANALYTICS START ===');
-    try {
-      setIsLoading(true);
-      const response = await fetch(`/api/admin/analytics`);
-      
-      if (!response.ok) throw new Error(`Failed: ${response.status}`);
-      
-      const data = await response.json();
-      console.log('Analytics data response:', data);
-      
-      if (data.success) {
-        setAnalyticsData(data.data);
-        toast.success('Analytics data loaded');
-      } else {
-        toast.error('Failed to load analytics');
-      }
-    } catch (error) {
-      console.error('Failed to fetch analytics:', error);
-      toast.error('Failed to load analytics');
-    } finally {
-      setIsLoading(false);
-      console.log('=== FETCH ANALYTICS END ===');
-    }
-  };
-
-  // Initial data fetch on mount and when activeNav changes
-  useEffect(() => {
-    console.log('AdminPanel: Initial data fetch for:', activeNav);
-    
-    const fetchInitialData = async () => {
-      await fetchAdminData();
-      await fetchDashboardData();
-      
-      // Fetch data based on active tab
       switch (activeNav) {
+        case 'dashboard':
+          await fetchDashboardData();
+          break;
         case 'users':
           await fetchUsersData();
           break;
@@ -908,80 +705,222 @@ export function AdminPanelEnhanced() {
           await fetchAnalyticsData();
           break;
       }
-    };
-    
-    fetchInitialData();
-    
-  }, [activeNav]); // Only re-run when activeNav changes
+      toast.success('Data refreshed');
+    } catch (error) {
+      toast.error('Failed to refresh data');
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [activeNav, fetchDashboardData, fetchUsersData, fetchDepositsData, fetchWithdrawalsData, fetchGamesData, fetchTransactionsData, fetchAnalyticsData]);
 
-  // Handle refresh
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await fetchDashboardData();
-    
-    // Refresh current tab data
-    switch (activeNav) {
-      case 'dashboard':
-        await fetchDashboardData();
-        break;
-      case 'users':
-        await fetchUsersData();
-        break;
-      case 'deposits':
-        await fetchDepositsData();
-        break;
-      case 'withdrawals':
-        await fetchWithdrawalsData();
-        break;
-      case 'games':
-        await fetchGamesData();
-        break;
-      case 'transactions':
-        await fetchTransactionsData();
-        break;
-      case 'analytics':
-        await fetchAnalyticsData();
-        break;
+  // Approve deposit
+  const handleApproveDeposit = useCallback(async (depositId: string) => {
+    const deposit = depositsData.find(d => d.id === depositId);
+    if (!deposit) {
+      toast.error('Deposit not found');
+      return;
     }
     
-    setIsRefreshing(false);
-    toast.success('Data refreshed');
-  };
+    if (!confirm(`Approve ${deposit.amount} ETB deposit from ${deposit.user?.username}?`)) {
+      return;
+    }
 
-  // Calculate stats
-  const pendingDeposits = depositsData.filter(d => d.status === 'pending');
-  const pendingWithdrawals = withdrawals.filter((w: any) => w.status === 'pending');
-  const onlineUsers = allUsers.filter((u: any) => u.is_online);
-  const adminUsers = allUsers.filter((u: any) => u.role === 'admin');
-  const totalDeposits = deposits.reduce((sum: number, d: any) => sum + d.amount, 0);
-  const totalWithdrawals = withdrawals.reduce((sum: number, w: any) => sum + w.amount, 0);
-  const totalRevenue = totalDeposits - totalWithdrawals;
+    try {
+      setIsProcessingDeposit(true);
+      
+      const payload = {
+        action: 'approve',
+        type: 'deposits',
+        ids: [depositId]
+      };
+      
+      const response = await fetch('/api/admin/working-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success('✅ Deposit approved successfully!');
+        
+        setDepositsData(prev => prev.map(d => 
+          d.id === depositId 
+            ? { ...d, status: 'approved', approved_by: 'admin', approved_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+            : d
+        ));
+        
+        setTimeout(() => fetchDepositsData(), 1000);
+        fetchDashboardData();
+      } else {
+        toast.error(data.message || 'Failed to approve deposit');
+      }
+    } catch (error: any) {
+      toast.error(`Error: ${error.message}`);
+    } finally {
+      setIsProcessingDeposit(false);
+    }
+  }, [depositsData, fetchDepositsData, fetchDashboardData]);
 
-  // Data for charts
-  const revenueChartData = dashboardStats ? [
-    { name: 'Deposits', value: dashboardStats.total_deposits_amount, color: CHART_COLORS.success },
-    { name: 'Withdrawals', value: dashboardStats.total_withdrawals_amount, color: CHART_COLORS.danger },
-    { name: 'Revenue', value: dashboardStats.total_revenue, color: CHART_COLORS.primary },
-  ] : [];
+  // Reject deposit
+  const handleRejectDeposit = useCallback(async (depositId: string, reason: string = '') => {
+    if (!reason.trim()) {
+      toast.error('Please provide a reason for rejection');
+      return;
+    }
 
-  const userGrowthData = [
+    if (!confirm('Are you sure you want to reject this deposit?')) {
+      return;
+    }
+
+    try {
+      setIsProcessingDeposit(true);
+
+      const response = await fetch('/api/admin/working-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reject',
+          type: 'deposits',
+          ids: [depositId],
+          admin_notes: reason,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast.success('Deposit rejected successfully!');
+        setDepositsData(prev => prev.map(deposit =>
+          deposit.id === depositId ? { ...deposit, status: 'rejected' } : deposit
+        ));
+        setRejectReason('');
+        fetchDashboardData();
+      } else {
+        toast.error(data.message || 'Failed to reject deposit');
+      }
+    } catch (error) {
+      toast.error('Failed to reject deposit');
+    } finally {
+      setIsProcessingDeposit(false);
+      setShowDepositDetails(false);
+    }
+  }, [fetchDashboardData]);
+
+  // View deposit details
+  const handleViewDepositDetails = useCallback((deposit: Deposit) => {
+    setSelectedDeposit(deposit);
+    setShowDepositDetails(true);
+  }, []);
+
+  // Bulk approve deposits
+  const handleBulkApproveDeposits = useCallback(async () => {
+    if (selectedItems.length === 0) {
+      toast.warning('No deposits selected');
+      return;
+    }
+
+    if (!confirm(`Approve ${selectedItems.length} deposits?`)) return;
+
+    try {
+      setIsProcessingDeposit(true);
+      const response = await fetch('/api/admin/deposits/bulk-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deposit_ids: selectedItems,
+          admin_notes: 'Bulk approved by admin',
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success(`${selectedItems.length} deposits approved!`);
+        fetchDepositsData();
+        fetchDashboardData();
+        setSelectedItems([]);
+      } else {
+        toast.error(data.message || 'Failed to approve deposits');
+      }
+    } catch (error) {
+      toast.error('Failed to approve deposits');
+    } finally {
+      setIsProcessingDeposit(false);
+    }
+  }, [selectedItems, fetchDepositsData, fetchDashboardData]);
+
+  // Bulk reject deposits
+  const handleBulkRejectDeposits = useCallback(async () => {
+    if (selectedItems.length === 0) {
+      toast.warning('No deposits selected');
+      return;
+    }
+
+    if (!rejectReason.trim()) {
+      toast.error('Please provide a reason');
+      return;
+    }
+
+    if (!confirm(`Reject ${selectedItems.length} deposits?`)) return;
+
+    try {
+      setIsProcessingDeposit(true);
+      const response = await fetch('/api/admin/deposits/bulk-reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deposit_ids: selectedItems,
+          admin_notes: rejectReason,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success(`${selectedItems.length} deposits rejected!`);
+        fetchDepositsData();
+        fetchDashboardData();
+        setSelectedItems([]);
+        setRejectReason('');
+      } else {
+        toast.error(data.message || 'Failed to reject deposits');
+      }
+    } catch (error) {
+      toast.error('Failed to reject deposits');
+    } finally {
+      setIsProcessingDeposit(false);
+    }
+  }, [selectedItems, rejectReason, fetchDepositsData, fetchDashboardData]);
+
+  // Chart data with safe checks
+  const revenueChartData = useMemo(() => {
+    if (!dashboardStats) return []
+    return [
+      { name: 'Deposits', value: dashboardStats.total_deposits_amount || 0, color: CHART_COLORS.success },
+      { name: 'Withdrawals', value: dashboardStats.total_withdrawals_amount || 0, color: CHART_COLORS.danger },
+      { name: 'Revenue', value: dashboardStats.total_revenue || 0, color: CHART_COLORS.primary },
+    ]
+  }, [dashboardStats])
+
+  const userGrowthData = useMemo(() => [
     { month: 'Jan', users: 100 },
     { month: 'Feb', users: 150 },
     { month: 'Mar', users: 200 },
     { month: 'Apr', users: 250 },
     { month: 'May', users: 300 },
     { month: 'Jun', users: dashboardStats?.total_users || 350 },
-  ];
+  ], [dashboardStats])
 
   // Render Sidebar
-  const renderSidebar = () => (
+  const renderSidebar = useCallback(() => (
     <div className={cn(
       "fixed inset-y-0 left-0 z-50 flex flex-col bg-background border-r transition-all duration-300 ease-in-out",
       isSidebarCollapsed ? "w-20" : "w-64",
       "lg:relative lg:translate-x-0",
       isMobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
     )}>
-      {/* Sidebar Header */}
       <div className="flex items-center justify-between p-4 border-b">
         {!isSidebarCollapsed && (
           <div className="flex items-center gap-2">
@@ -1002,7 +941,7 @@ export function AdminPanelEnhanced() {
           onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           className="hidden lg:inline-flex"
         >
-          {isSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          {isSidebarCollapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </Button>
         <Button
           variant="ghost"
@@ -1014,7 +953,6 @@ export function AdminPanelEnhanced() {
         </Button>
       </div>
 
-      {/* User Info */}
       {!isSidebarCollapsed && (
         <div className="p-4 border-b">
           <div className="flex items-center gap-3">
@@ -1029,7 +967,6 @@ export function AdminPanelEnhanced() {
         </div>
       )}
 
-      {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-4">
         <ul className="space-y-1">
           {NAVIGATION_ITEMS.map((item) => {
@@ -1053,7 +990,6 @@ export function AdminPanelEnhanced() {
         </ul>
       </nav>
 
-      {/* Sidebar Footer */}
       <div className="p-4 border-t">
         <div className="space-y-2">
           {!isSidebarCollapsed && (
@@ -1082,19 +1018,17 @@ export function AdminPanelEnhanced() {
         </div>
       </div>
     </div>
-  );
+  ), [isSidebarCollapsed, isMobileMenuOpen, activeNav, user, pendingDeposits.length, onlineUsers.length, handleNavClick, logout]);
 
   // Render Dashboard
-  const renderDashboard = () => (
+  const renderDashboard = useCallback(() => (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground">Welcome back, {user?.firstName}. Here's what's happening.</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Last Updated Indicator */}
           {lastPollTime && (
             <div className="text-xs text-muted-foreground mr-2">
               Last updated: {lastPollTime.toLocaleTimeString()}
@@ -1111,9 +1045,8 @@ export function AdminPanelEnhanced() {
         </div>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {dashboardStats && [
+        {dashboardStats ? [
           {
             title: "Pending Deposits",
             value: pendingDeposits.length.toString(),
@@ -1124,23 +1057,23 @@ export function AdminPanelEnhanced() {
           },
           {
             title: "Total Deposits",
-            value: `ETB ${dashboardStats.total_deposits_amount.toLocaleString()}`,
-            change: `${dashboardStats.revenue_growth}%`,
-            isPositive: dashboardStats.revenue_growth >= 0,
+            value: `ETB ${(dashboardStats.total_deposits_amount || 0).toLocaleString()}`,
+            change: `${dashboardStats.revenue_growth || 0}%`,
+            isPositive: (dashboardStats.revenue_growth || 0) >= 0,
             icon: DollarSign,
             color: "bg-primary/10 text-primary",
           },
           {
             title: "Active Users",
-            value: dashboardStats.active_users.toLocaleString(),
-            change: `${dashboardStats.user_growth}%`,
-            isPositive: dashboardStats.user_growth >= 0,
+            value: (dashboardStats.active_users || 0).toLocaleString(),
+            change: `${dashboardStats.user_growth || 0}%`,
+            isPositive: (dashboardStats.user_growth || 0) >= 0,
             icon: Users,
             color: "bg-success/10 text-success",
           },
           {
             title: "Daily Winners",
-            value: dashboardStats.daily_winners.toLocaleString(),
+            value: (dashboardStats.daily_winners || 0).toLocaleString(),
             change: "+2 today",
             isPositive: true,
             icon: Trophy,
@@ -1170,10 +1103,23 @@ export function AdminPanelEnhanced() {
               </CardContent>
             </Card>
           );
-        })}
+        }) : (
+          Array(4).fill(0).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="p-6">
+                <div className="animate-pulse flex items-center justify-between">
+                  <div className="h-10 w-10 bg-muted rounded-lg" />
+                  <div className="text-right space-y-2">
+                    <div className="h-4 w-20 bg-muted rounded" />
+                    <div className="h-6 w-24 bg-muted rounded" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -1182,20 +1128,26 @@ export function AdminPanelEnhanced() {
           </CardHeader>
           <CardContent>
             <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <RechartsBarChart data={revenueChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="name" stroke="#9ca3af" />
-                  <YAxis stroke="#9ca3af" />
-                  <RechartsTooltip formatter={(value) => [`ETB ${Number(value).toLocaleString()}`, 'Amount']} />
-                  <Legend />
-                  <Bar dataKey="value" name="Amount" radius={[4, 4, 0, 0]}>
-                    {revenueChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </RechartsBarChart>
-              </ResponsiveContainer>
+              {revenueChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsBarChart data={revenueChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                    <XAxis dataKey="name" stroke="#9ca3af" />
+                    <YAxis stroke="#9ca3af" />
+                    <RechartsTooltip formatter={(value) => [`ETB ${Number(value).toLocaleString()}`, 'Amount']} />
+                    <Legend />
+                    <Bar dataKey="value" name="Amount" radius={[4, 4, 0, 0]}>
+                      {revenueChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </RechartsBarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-muted-foreground">
+                  No data available
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1230,10 +1182,10 @@ export function AdminPanelEnhanced() {
         </Card>
       </div>
     </div>
-  );
+  ), [user, lastPollTime, handleRefresh, isRefreshing, dashboardStats, pendingDeposits.length, revenueChartData, userGrowthData]);
 
-  // Render Users Management
-  const renderUsers = () => (
+  // Render Users
+  const renderUsers = useCallback(() => (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -1246,22 +1198,13 @@ export function AdminPanelEnhanced() {
               Last updated: {lastPollTime.toLocaleTimeString()}
             </div>
           )}
-          <Button 
-            variant="outline" 
-            onClick={fetchUsersData}
-            disabled={isLoading}
-          >
+          <Button variant="outline" onClick={fetchUsersData} disabled={isLoading}>
             <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
             Refresh
-          </Button>
-          <Button>
-            <Download className="h-4 w-4 mr-2" />
-            Export Users
           </Button>
         </div>
       </div>
 
-      {/* Users table */}
       <Card>
         <CardContent className="p-0">
           {isLoading && usersData.length === 0 ? (
@@ -1273,12 +1216,7 @@ export function AdminPanelEnhanced() {
             <div className="flex flex-col items-center justify-center p-8">
               <Users className="h-12 w-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground">No users found</p>
-              <Button 
-                variant="outline" 
-                className="mt-4"
-                onClick={fetchUsersData}
-                disabled={isLoading}
-              >
+              <Button variant="outline" className="mt-4" onClick={fetchUsersData} disabled={isLoading}>
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Load Users
               </Button>
@@ -1305,21 +1243,21 @@ export function AdminPanelEnhanced() {
                             <User className="h-5 w-5 text-primary" />
                           </div>
                           <div>
-                            <div className="font-medium">{user.username}</div>
-                            <div className="text-sm text-muted-foreground">{user.first_name}</div>
+                            <div className="font-medium">{user.username || 'N/A'}</div>
+                            <div className="text-sm text-muted-foreground">{user.first_name || 'N/A'}</div>
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="font-mono text-sm">{user.telegram_id}</div>
+                        <div className="font-mono text-sm">{user.telegram_id || 'N/A'}</div>
                       </TableCell>
                       <TableCell>
-                        <div className="font-bold">{parseFloat(user.balance).toFixed(2)} ETB</div>
+                        <div className="font-bold">{Number(user.balance || 0).toFixed(2)} ETB</div>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                            {user.role}
+                            {user.role || 'user'}
                           </Badge>
                           <Badge variant={user.is_online ? 'default' : 'outline'}>
                             {user.is_online ? 'Online' : 'Offline'}
@@ -1328,7 +1266,7 @@ export function AdminPanelEnhanced() {
                       </TableCell>
                       <TableCell>
                         <div className="text-sm">
-                          {new Date(user.created_at).toLocaleDateString()}
+                          {user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
@@ -1350,10 +1288,10 @@ export function AdminPanelEnhanced() {
         </CardContent>
       </Card>
     </div>
-  );
+  ), [lastPollTime, fetchUsersData, isLoading, usersData]);
 
-  // Render Deposits Management
-  const renderDeposits = () => (
+  // Render Deposits
+  const renderDeposits = useCallback(() => (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -1366,22 +1304,13 @@ export function AdminPanelEnhanced() {
               Last updated: {lastPollTime.toLocaleTimeString()}
             </div>
           )}
-          <Button 
-            variant="outline" 
-            onClick={fetchDepositsData}
-            disabled={isLoading}
-          >
+          <Button variant="outline" onClick={fetchDepositsData} disabled={isLoading}>
             <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
             Refresh
-          </Button>
-          <Button onClick={() => window.open('/api/admin/deposits/export', '_blank')}>
-            <Download className="h-4 w-4 mr-2" />
-            Export
           </Button>
         </div>
       </div>
 
-      {/* Stats Cards for Deposits */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           {
@@ -1393,7 +1322,7 @@ export function AdminPanelEnhanced() {
           },
           {
             title: "Total Amount",
-            value: `ETB ${depositsData.reduce((sum, d) => sum + d.amount, 0).toLocaleString()}`,
+            value: `ETB ${depositsData.reduce((sum, d) => sum + (d.amount || 0), 0).toLocaleString()}`,
             description: "All deposits",
             icon: DollarSign,
             color: "bg-primary/10 text-primary",
@@ -1402,7 +1331,7 @@ export function AdminPanelEnhanced() {
             title: "Approved Today",
             value: depositsData.filter(d => 
               d.status === 'approved' && 
-              new Date(d.updated_at).toDateString() === new Date().toDateString()
+              d.updated_at && new Date(d.updated_at).toDateString() === new Date().toDateString()
             ).length.toString(),
             description: "Successful",
             icon: CheckCircle,
@@ -1412,7 +1341,7 @@ export function AdminPanelEnhanced() {
             title: "Rejected Today",
             value: depositsData.filter(d => 
               d.status === 'rejected' && 
-              new Date(d.updated_at).toDateString() === new Date().toDateString()
+              d.updated_at && new Date(d.updated_at).toDateString() === new Date().toDateString()
             ).length.toString(),
             description: "Unsuccessful",
             icon: XCircle,
@@ -1439,10 +1368,9 @@ export function AdminPanelEnhanced() {
         })}
       </div>
 
-      {/* Filters */}
       <Card>
         <CardContent className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label>Search Deposits</Label>
               <div className="relative">
@@ -1466,21 +1394,6 @@ export function AdminPanelEnhanced() {
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="approved">Approved</SelectItem>
                   <SelectItem value="rejected">Rejected</SelectItem>
-                  <SelectItem value="failed">Failed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Payment Method</Label>
-              <Select>
-                <SelectTrigger>
-                  <SelectValue placeholder="All Methods" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Methods</SelectItem>
-                  <SelectItem value="telegram">Telegram</SelectItem>
-                  <SelectItem value="bank">Bank Transfer</SelectItem>
-                  <SelectItem value="cbe">CBE Birr</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1489,13 +1402,11 @@ export function AdminPanelEnhanced() {
               <div className="flex gap-2">
                 <Input 
                   type="date" 
-                  placeholder="Start" 
                   value={dateRange.start}
                   onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
                 />
                 <Input 
                   type="date" 
-                  placeholder="End" 
                   value={dateRange.end}
                   onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
                 />
@@ -1505,7 +1416,6 @@ export function AdminPanelEnhanced() {
         </CardContent>
       </Card>
 
-      {/* Bulk Actions */}
       {selectedItems.length > 0 && (
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="p-4">
@@ -1515,41 +1425,29 @@ export function AdminPanelEnhanced() {
                 <span className="font-medium">{selectedItems.length} deposits selected</span>
               </div>
               <div className="flex items-center gap-2">
-                <Button 
-                  size="sm" 
-                  onClick={handleBulkApproveDeposits}
-                  disabled={isProcessingDeposit}
-                >
-                  {isProcessingDeposit ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Check className="h-4 w-4 mr-2" />
-                  )}
-                  Approve Selected
+                <Button size="sm" onClick={handleBulkApproveDeposits} disabled={isProcessingDeposit}>
+                  {isProcessingDeposit ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+                  Approve
                 </Button>
                 <Dialog>
                   <DialogTrigger asChild>
-                    <Button 
-                      size="sm" 
-                      variant="destructive"
-                      disabled={isProcessingDeposit}
-                    >
+                    <Button size="sm" variant="destructive" disabled={isProcessingDeposit}>
                       <Ban className="h-4 w-4 mr-2" />
-                      Reject Selected
+                      Reject
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Reject Deposits</DialogTitle>
                       <DialogDescription>
-                        Please provide a reason for rejecting {selectedItems.length} deposit(s).
+                        Provide a reason for rejecting {selectedItems.length} deposit(s).
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <Label>Rejection Reason</Label>
                         <Input
-                          placeholder="Enter reason for rejection..."
+                          placeholder="Enter reason..."
                           value={rejectReason}
                           onChange={(e) => setRejectReason(e.target.value)}
                         />
@@ -1559,22 +1457,14 @@ export function AdminPanelEnhanced() {
                         disabled={!rejectReason.trim() || isProcessingDeposit}
                         className="w-full"
                       >
-                        {isProcessingDeposit ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Ban className="h-4 w-4 mr-2" />
-                        )}
+                        {isProcessingDeposit ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Ban className="h-4 w-4 mr-2" />}
                         Confirm Rejection
                       </Button>
                     </div>
                   </DialogContent>
                 </Dialog>
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => setSelectedItems([])}
-                >
-                  Clear Selection
+                <Button variant="ghost" size="sm" onClick={() => setSelectedItems([])}>
+                  Clear
                 </Button>
               </div>
             </div>
@@ -1582,7 +1472,6 @@ export function AdminPanelEnhanced() {
         </Card>
       )}
 
-      {/* Deposits Table */}
       <Card>
         <CardContent className="p-0">
           {isLoading && depositsData.length === 0 ? (
@@ -1594,12 +1483,7 @@ export function AdminPanelEnhanced() {
             <div className="flex flex-col items-center justify-center p-8">
               <CreditCard className="h-12 w-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground">No deposits found</p>
-              <Button 
-                variant="outline" 
-                className="mt-4"
-                onClick={fetchDepositsData}
-                disabled={isLoading}
-              >
+              <Button variant="outline" className="mt-4" onClick={fetchDepositsData} disabled={isLoading}>
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Load Deposits
               </Button>
@@ -1612,7 +1496,7 @@ export function AdminPanelEnhanced() {
                     <TableHead className="w-12">
                       <input 
                         type="checkbox"
-                        checked={selectedItems.length === filteredDeposits.length}
+                        checked={selectedItems.length === filteredDeposits.length && filteredDeposits.length > 0}
                         onChange={(e) => {
                           if (e.target.checked) {
                             setSelectedItems(filteredDeposits.map(d => d.id));
@@ -1661,11 +1545,11 @@ export function AdminPanelEnhanced() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="font-bold text-lg">{deposit.amount.toFixed(2)} ETB</div>
+                        <div className="font-bold text-lg">{Number(deposit.amount || 0).toFixed(2)} ETB</div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="font-mono">
-                          {deposit.method}
+                          {deposit.method || 'N/A'}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -1674,7 +1558,7 @@ export function AdminPanelEnhanced() {
                           deposit.status === 'pending' ? 'warning' :
                           deposit.status === 'rejected' ? 'destructive' : 'secondary'
                         }>
-                          {deposit.status.toUpperCase()}
+                          {deposit.status?.toUpperCase() || 'UNKNOWN'}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -1684,10 +1568,10 @@ export function AdminPanelEnhanced() {
                       </TableCell>
                       <TableCell>
                         <div className="text-sm">
-                          {new Date(deposit.created_at).toLocaleDateString()}
+                          {deposit.created_at ? new Date(deposit.created_at).toLocaleDateString() : 'N/A'}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {new Date(deposit.created_at).toLocaleTimeString()}
+                          {deposit.created_at ? new Date(deposit.created_at).toLocaleTimeString() : ''}
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
@@ -1748,14 +1632,14 @@ export function AdminPanelEnhanced() {
                                   <DialogHeader>
                                     <DialogTitle>Reject Deposit</DialogTitle>
                                     <DialogDescription>
-                                      Please provide a reason for rejecting this deposit of {deposit.amount} ETB.
+                                      Provide a reason for rejecting this deposit of {deposit.amount} ETB.
                                     </DialogDescription>
                                   </DialogHeader>
                                   <div className="space-y-4">
                                     <div className="space-y-2">
                                       <Label>Rejection Reason</Label>
                                       <Input
-                                        placeholder="Enter reason for rejection..."
+                                        placeholder="Enter reason..."
                                         value={rejectReason}
                                         onChange={(e) => setRejectReason(e.target.value)}
                                       />
@@ -1765,11 +1649,7 @@ export function AdminPanelEnhanced() {
                                       disabled={!rejectReason.trim() || isProcessingDeposit}
                                       className="w-full"
                                     >
-                                      {isProcessingDeposit ? (
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                      ) : (
-                                        <Ban className="h-4 w-4 mr-2" />
-                                      )}
+                                      {isProcessingDeposit ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Ban className="h-4 w-4 mr-2" />}
                                       Confirm Rejection
                                     </Button>
                                   </div>
@@ -1777,54 +1657,21 @@ export function AdminPanelEnhanced() {
                               </Dialog>
                             </>
                           )}
-                          
-                          {deposit.status === 'approved' && (
-                            <Badge variant="default" className="ml-2">
-                              Approved by: {deposit.approved_by || 'Admin'}
-                            </Badge>
-                          )}
                         </div>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-              
-              {/* Pagination */}
-              {filteredDeposits.length > 10 && (
-                <div className="flex items-center justify-between p-4 border-t">
-                  <div className="text-sm text-muted-foreground">
-                    Showing 1-10 of {filteredDeposits.length} deposits
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                      disabled={currentPage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <span className="text-sm">Page {currentPage}</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(currentPage + 1)}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </CardContent>
       </Card>
     </div>
-  );
+  ), [lastPollTime, fetchDepositsData, isLoading, depositsData, pendingDeposits.length, searchQuery, depositStatusFilter, dateRange, selectedItems, isProcessingDeposit, handleBulkApproveDeposits, handleBulkRejectDeposits, rejectReason, filteredDeposits, handleViewDepositDetails, handleApproveDeposit, handleRejectDeposit]);
 
-  // Render other sections (simplified placeholders)
-  const renderWithdrawals = () => (
+  // Placeholder renders for other sections
+  const renderWithdrawals = useCallback(() => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Withdrawal Management</h1>
@@ -1834,12 +1681,15 @@ export function AdminPanelEnhanced() {
           </div>
         )}
       </div>
-      <p className="text-muted-foreground">Manage and process withdrawal requests</p>
-      {/* Add withdrawals table */}
+      <Card>
+        <CardContent className="p-8 text-center text-muted-foreground">
+          Withdrawal management coming soon...
+        </CardContent>
+      </Card>
     </div>
-  );
+  ), [lastPollTime]);
 
-  const renderGames = () => (
+  const renderGames = useCallback(() => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Games Management</h1>
@@ -1849,12 +1699,15 @@ export function AdminPanelEnhanced() {
           </div>
         )}
       </div>
-      <p className="text-muted-foreground">Monitor and manage active games</p>
-      {/* Add games table */}
+      <Card>
+        <CardContent className="p-8 text-center text-muted-foreground">
+          Games management coming soon...
+        </CardContent>
+      </Card>
     </div>
-  );
+  ), [lastPollTime]);
 
-  const renderTransactions = () => (
+  const renderTransactions = useCallback(() => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Transaction History</h1>
@@ -1864,12 +1717,15 @@ export function AdminPanelEnhanced() {
           </div>
         )}
       </div>
-      <p className="text-muted-foreground">View all system transactions</p>
-      {/* Add transactions table */}
+      <Card>
+        <CardContent className="p-8 text-center text-muted-foreground">
+          Transaction history coming soon...
+        </CardContent>
+      </Card>
     </div>
-  );
+  ), [lastPollTime]);
 
-  const renderAnalytics = () => (
+  const renderAnalytics = useCallback(() => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Analytics Dashboard</h1>
@@ -1879,23 +1735,27 @@ export function AdminPanelEnhanced() {
           </div>
         )}
       </div>
-      <p className="text-muted-foreground">Detailed analytics and insights</p>
-      {/* Add analytics charts */}
+      <Card>
+        <CardContent className="p-8 text-center text-muted-foreground">
+          Analytics dashboard coming soon...
+        </CardContent>
+      </Card>
     </div>
-  );
+  ), [lastPollTime]);
 
-  const renderSettings = () => (
+  const renderSettings = useCallback(() => (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-      <p className="text-muted-foreground">System configuration and preferences</p>
-      {/* Add settings forms */}
+      <Card>
+        <CardContent className="p-8 text-center text-muted-foreground">
+          Settings coming soon...
+        </CardContent>
+      </Card>
     </div>
-  );
+  ), []);
 
-  // Main Render
   return (
     <div className="flex min-h-screen bg-background">
-      {/* Mobile Menu Button */}
       <Button
         variant="ghost"
         size="icon"
@@ -1905,10 +1765,8 @@ export function AdminPanelEnhanced() {
         <Menu className="h-5 w-5" />
       </Button>
 
-      {/* Sidebar */}
       {renderSidebar()}
 
-      {/* Overlay for mobile */}
       {isMobileMenuOpen && (
         <div
           className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
@@ -1916,10 +1774,8 @@ export function AdminPanelEnhanced() {
         />
       )}
 
-      {/* Main Content */}
       <div className="flex-1 overflow-auto">
         <div className="container max-w-7xl mx-auto p-4 lg:p-6">
-          {/* Mobile Header */}
           <div className="flex items-center justify-between mb-6 lg:hidden">
             <div className="flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -1937,7 +1793,6 @@ export function AdminPanelEnhanced() {
             </div>
           </div>
 
-          {/* Content based on active nav */}
           {activeNav === "dashboard" && renderDashboard()}
           {activeNav === "users" && renderUsers()}
           {activeNav === "deposits" && renderDeposits()}
@@ -1949,7 +1804,6 @@ export function AdminPanelEnhanced() {
         </div>
       </div>
 
-      {/* Deposit Details Sheet */}
       <Sheet open={showDepositDetails} onOpenChange={setShowDepositDetails}>
         <SheetContent className="sm:max-w-md">
           <SheetHeader>
@@ -1963,7 +1817,7 @@ export function AdminPanelEnhanced() {
               <div className="space-y-3">
                 <div>
                   <Label className="text-xs">Deposit ID</Label>
-                  <p className="text-sm font-mono">{selectedDeposit.id}</p>
+                  <p className="text-sm font-mono">{selectedDeposit.id || 'N/A'}</p>
                 </div>
                 <div>
                   <Label className="text-xs">User Information</Label>
@@ -1974,18 +1828,18 @@ export function AdminPanelEnhanced() {
                     <div>
                       <p className="font-medium">{selectedDeposit.user?.username || 'Unknown'}</p>
                       <p className="text-sm text-muted-foreground">{selectedDeposit.user?.first_name || 'No name'}</p>
-                      <p className="text-xs text-muted-foreground">ID: {selectedDeposit.user_id}</p>
+                      <p className="text-xs text-muted-foreground">ID: {selectedDeposit.user_id || 'N/A'}</p>
                     </div>
                   </div>
                 </div>
                 <div>
                   <Label className="text-xs">Amount</Label>
-                  <p className="text-2xl font-bold text-primary">{selectedDeposit.amount.toFixed(2)} ETB</p>
+                  <p className="text-2xl font-bold text-primary">{Number(selectedDeposit.amount || 0).toFixed(2)} ETB</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-xs">Payment Method</Label>
-                    <p className="text-sm font-medium">{selectedDeposit.method}</p>
+                    <p className="text-sm font-medium">{selectedDeposit.method || 'N/A'}</p>
                   </div>
                   <div>
                     <Label className="text-xs">Status</Label>
@@ -1994,7 +1848,7 @@ export function AdminPanelEnhanced() {
                       selectedDeposit.status === 'pending' ? 'warning' :
                       selectedDeposit.status === 'rejected' ? 'destructive' : 'secondary'
                     } className="mt-1">
-                      {selectedDeposit.status.toUpperCase()}
+                      {selectedDeposit.status?.toUpperCase() || 'UNKNOWN'}
                     </Badge>
                   </div>
                 </div>
@@ -2015,18 +1869,18 @@ export function AdminPanelEnhanced() {
                     <Label className="text-xs">Approved By</Label>
                     <p className="text-sm">{selectedDeposit.approved_by}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(selectedDeposit.approved_at || '').toLocaleString()}
+                      {selectedDeposit.approved_at ? new Date(selectedDeposit.approved_at).toLocaleString() : ''}
                     </p>
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-xs">Created</Label>
-                    <p className="text-sm">{new Date(selectedDeposit.created_at).toLocaleString()}</p>
+                    <p className="text-sm">{selectedDeposit.created_at ? new Date(selectedDeposit.created_at).toLocaleString() : 'N/A'}</p>
                   </div>
                   <div>
                     <Label className="text-xs">Last Updated</Label>
-                    <p className="text-sm">{new Date(selectedDeposit.updated_at).toLocaleString()}</p>
+                    <p className="text-sm">{selectedDeposit.updated_at ? new Date(selectedDeposit.updated_at).toLocaleString() : 'N/A'}</p>
                   </div>
                 </div>
               </div>
@@ -2038,20 +1892,12 @@ export function AdminPanelEnhanced() {
                     onClick={() => handleApproveDeposit(selectedDeposit.id)}
                     disabled={isProcessingDeposit}
                   >
-                    {isProcessingDeposit ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Check className="h-4 w-4 mr-2" />
-                    )}
+                    {isProcessingDeposit ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
                     Approve
                   </Button>
                   <Dialog>
                     <DialogTrigger asChild>
-                      <Button 
-                        variant="destructive" 
-                        className="flex-1"
-                        disabled={isProcessingDeposit}
-                      >
+                      <Button variant="destructive" className="flex-1" disabled={isProcessingDeposit}>
                         <Ban className="h-4 w-4 mr-2" />
                         Reject
                       </Button>
@@ -2060,14 +1906,14 @@ export function AdminPanelEnhanced() {
                       <DialogHeader>
                         <DialogTitle>Reject Deposit</DialogTitle>
                         <DialogDescription>
-                          Please provide a reason for rejecting this deposit.
+                          Provide a reason for rejecting this deposit.
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4">
                         <div className="space-y-2">
                           <Label>Rejection Reason</Label>
                           <Input
-                            placeholder="Enter reason for rejection..."
+                            placeholder="Enter reason..."
                             value={rejectReason}
                             onChange={(e) => setRejectReason(e.target.value)}
                           />
@@ -2077,11 +1923,7 @@ export function AdminPanelEnhanced() {
                           disabled={!rejectReason.trim() || isProcessingDeposit}
                           className="w-full"
                         >
-                          {isProcessingDeposit ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          ) : (
-                            <Ban className="h-4 w-4 mr-2" />
-                          )}
+                          {isProcessingDeposit ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Ban className="h-4 w-4 mr-2" />}
                           Confirm Rejection
                         </Button>
                       </div>
@@ -2093,13 +1935,9 @@ export function AdminPanelEnhanced() {
           )}
         </SheetContent>
       </Sheet>
-
-      {/* Toast Container */}
-      <div className="fixed bottom-0 right-0 p-4 z-50" />
     </div>
   );
 }
 
-// Add named exports for easier access
 export const AdminPanel = AdminPanelEnhanced;
 export default AdminPanelEnhanced;
