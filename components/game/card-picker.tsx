@@ -971,572 +971,198 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900 p-3 md:p-6 relative overflow-hidden">
-      {/* Countdown Display */}
-      {showCountdown && gameSession && currentUser && (
-        <CountdownDisplay
-          sessionCode={gameSession.code}
-          userId={currentUser.id}
-          onGameStart={handleCountdownStart}
-          onCancel={handleCountdownCancel}
+ return (
+  <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-green-100 p-4 md:p-8 relative overflow-hidden">
+
+    {/* Countdown */}
+    {showCountdown && gameSession && currentUser && (
+      <CountdownDisplay
+        sessionCode={gameSession.code}
+        userId={currentUser.id}
+        onGameStart={handleCountdownStart}
+        onCancel={handleCountdownCancel}
+      />
+    )}
+
+    {/* BINGO Game */}
+    {showBingoGame && bingoGameData && (
+      <div className="fixed inset-0 z-50 bg-white">
+        <BingoGame 
+          initialData={bingoGameData}
+          onClose={handleBingoGameClose}
+          isMultiplayer={true}
+          sessionId={gameSession?.id}
+          userId={currentUser?.id}
         />
-      )}
+      </div>
+    )}
 
-      {/* BINGO Game Component */}
-      {showBingoGame && bingoGameData && (
-        <div className="fixed inset-0 z-50">
-          <BingoGame 
-            initialData={bingoGameData}
-            onClose={handleBingoGameClose}
-            isMultiplayer={true}
-            sessionId={gameSession?.id}
-            userId={currentUser?.id}
-          />
-        </div>
-      )}
+    {/* Top Action Buttons */}
+    {currentUser && !showBingoGame && !showCountdown && (
+      <div className="fixed top-4 right-10 z-40 flex gap-3">
+        <button
+          onClick={handleLogout}
+          disabled={isLoading}
+          className="px-4 py-2 bg-red-500 text-white rounded-xl shadow hover:shadow-lg transition disabled:opacity-50"
+        >
+          Logout
+        </button>
 
-      {/* Top Action Buttons */}
-      {currentUser && !showBingoGame && !showCountdown && (
-        <div className="fixed top-2 right-4 z-300 flex gap-2">
-          <button
-            onClick={handleLogout}
-            disabled={isLoading}
-            className="px-2 py-2 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-full flex items-center gap-2 hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm text-sm disabled:opacity-50"
-            title="Logout"
-          >
-            <BoxArrowRight size={16} />
-            Logout
-          </button>
-          <button
-            onClick={() => setShowQuickStats(!showQuickStats)}
-            disabled={isLoading}
-            className="px-4 py-2.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full flex items-center gap-2 hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm text-sm disabled:opacity-50"
-          >
-            <TrophyFill size={16} />
-            {showQuickStats ? 'Hide Stats' : 'Show Stats'}
-          </button>
-          <button
-            onClick={toggleSound}
-            className="p-2.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-full hover:shadow-xl hover:scale-105 transition-all shadow-lg backdrop-blur-sm"
-            title={soundEnabled ? 'Mute Sound' : 'Unmute Sound'}
-          >
-            {soundEnabled ? <VolumeUpFill size={16} /> : <VolumeMuteFill size={16} />}
-          </button>
-        </div>
-      )}
+       
 
-      <div className="max-w-7xl mx-auto relative z-10">
-        {/* Only show card picker content when bingo game or countdown is NOT showing */}
-        {!showBingoGame && !showCountdown ? (
-          <>
-            {/* Header */}
-            <div className="relative overflow-hidden rounded-3xl mb-6 md:mb-8">
-              <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 via-pink-600/20 to-indigo-600/20 backdrop-blur-sm"></div>
-              <div className="relative bg-gradient-to-r from-indigo-700/90 via-purple-700/90 to-pink-700/90 text-white rounded-3xl p-6 md:p-8 shadow-2xl border border-white/10">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                  {/* User Info */}
-                  {currentUser ? (
-                    <div className="flex flex-col items-center md:items-end gap-3">
-                      <div className="relative group">
-                        <div className="absolute inset-0 bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl blur opacity-0 group-hover:opacity-50 transition-opacity"></div>
-                        <div className="relative bg-black/30 backdrop-blur-sm rounded-2xl px-6 py-4 border border-white/20">
-                          <div className="flex items-center gap-4">
-                            <div className="relative">
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
-                                <PersonCircle size={14} className="text-white" />
-                              </div>
-                              {userVerification?.verified && (
-                                <div className="absolute -top-1 -right-1 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full p-1 shadow-lg">
-                                  <ShieldCheck size={10} className="text-white" />
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-left">
-                              <p className="font-bold text-sm flex items-center gap-2">
-                                {currentUser.firstName}
-                                {currentUser.role === 'admin' && (
-                                  <span className="text-xs px-2 py-0.5 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full">
-                                    ADMIN
-                                  </span>
-                                )}
-                              </p>
-                              <p className="opacity-90 text-sm">
-                                @{currentUser.username}
-                              </p>
-                              <div className="flex items-center gap-3 mt-2">
-                                <div className="flex items-center gap-1 bg-black/30 rounded-full px-3 py-1">
-                                  <Coin size={14} className="text-yellow-400" />
-                                  <span className="font-bold">${currentUser.balance?.toFixed(2)}</span>
-                                </div>
-                                {currentUser.bonusBalance && currentUser.bonusBalance > 0 && (
-                                  <div className="flex items-center gap-1 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-full px-3 py-1">
-                                    <GiftFill size={14} className="text-orange-300" />
-                                    <span className="font-bold text-yellow-300">+${currentUser.bonusBalance?.toFixed(2)}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="text-center">
-                        <ShieldCheck size={28} className="text-red-300 mx-auto mb-2" />
-                        <p className="font-bold text-xl mb-2">Authentication Required</p>
-                        <p className="opacity-90">Login to access multiplayer games</p>
-                      </div>
-                      <div className="flex gap-3">
-                        <button
-                          onClick={handleReauth}
-                          disabled={isLoading}
-                          className="px-5 py-2.5 bg-gradient-to-r from-white/20 to-white/10 rounded-lg hover:bg-white/30 disabled:opacity-50 transition-all backdrop-blur-sm"
-                        >
-                          Re-authenticate
-                        </button>
-                        <button
-                          onClick={handleLoginRedirect}
-                          className="px-5 py-2.5 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg font-semibold hover:shadow-lg transition-all"
-                        >
-                          Login Now
-                        </button>
-                      </div>
-                    </div>
-                  )}
+      </div>
+    )}
+
+    <div className="max-w-7xl mx-auto">
+
+      {!showBingoGame && !showCountdown ? (
+        <>
+          {/* HEADER */}
+          <div className="bg-white rounded-3xl shadow-lg p-6 md:p-8 mb-8 border border-green-100">
+            {currentUser ? (
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                
+                <div>
+                  <h1 className="text-2xl font-bold text-green-700">
+                    Welcome, {currentUser.firstName}
+                  </h1>
+                  <p className="text-green-600">@{currentUser.username}</p>
                 </div>
+
+                <div className="flex gap-6">
+                  <div className="bg-green-50 px-4 py-3 rounded-xl">
+                    <p className="text-sm text-green-500">Balance</p>
+                    <p className="font-bold text-green-700">
+                      ETB {currentUser.balance?.toFixed(2) || '0.00'}
+                    </p>
+                  </div>
+
+                  <div className="bg-emerald-50 px-4 py-3 rounded-xl">
+                    <p className="text-sm text-emerald-500">Waiting</p>
+                    <p className="font-bold text-emerald-700">
+                      {Object.keys(waitingCartelas).length}
+                    </p>
+                  </div>
+                </div>
+
               </div>
-            </div>
-
-            {/* Quick Stats (Collapsible) */}
-            {showQuickStats && currentUser && (
-              <div className="mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="bg-gradient-to-br from-purple-600/20 to-pink-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-white/70 mb-1">Available Cartelas</p>
-                        <p className="text-sm font-bold text-white">
-                          {cartelas.filter(c => c.status === 'available').length}
-                        </p>
-                      </div>
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center">
-                        <StarFill size={20} className="text-white" />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-gradient-to-br from-blue-600/20 to-cyan-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-white/70 mb-1">Waiting Cartelas</p>
-                        <p className="text-sm font-bold text-white">
-                          {Object.keys(waitingCartelas).length}
-                        </p>
-                      </div>
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 flex items-center justify-center">
-                        <ClockFill size={20} className="text-white" />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-gradient-to-br from-green-600/20 to-emerald-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-white/70 mb-1">Balance</p>
-                        <p className="text-sm font-bold text-white">
-                          ETB {currentUser.balance?.toFixed(2) || '0.00'}
-                        </p>
-                      </div>
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 flex items-center justify-center">
-                        <Coin size={20} className="text-white" />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-gradient-to-br from-yellow-600/20 to-orange-600/20 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-white/70 mb-1">Selected Cartela</p>
-                        <p className="text-sm font-bold text-white">
-                          {selectedCartela?.cartela_number || '--'}
-                        </p>
-                      </div>
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
-                        <CardChecklist size={20} className="text-white" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
+            ) : (
+              <div className="text-center">
+                <h2 className="text-xl font-semibold text-green-700 mb-4">
+                  Login Required
+                </h2>
+                <button
+                  onClick={handleLoginRedirect}
+                  className="px-6 py-3 bg-green-600 text-white rounded-xl shadow hover:shadow-lg transition"
+                >
+                  Login Now
+                </button>
               </div>
             )}
+          </div>
 
-            {/* Main Content */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
-              {/* Left Column - Cartela Selection */}
-              <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-sm rounded-3xl shadow-2xl p-5 md:p-6 border border-white/10">
-                {/* Controls Header */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold text-white mb-2">Select Your Cartela</h2>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-white/70">
-                        {filteredCartelas.filter(c => c.status === 'available').length} available •{' '}
-                        {Object.keys(waitingCartelas).length} waiting
-                      </span>
-                      <button
-                        onClick={() => setShowFilters(!showFilters)}
-                        className="px-3 py-1 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 rounded-full text-sm text-white/90 hover:bg-blue-500/30 transition-all"
-                      >
-                        <Filter size={14} className="inline mr-1" />
-                        {showFilters ? 'Hide Filters' : 'Show Filters'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Filters */}
-                {showFilters && (
-                  <div className="mb-4 p-2 bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-2xl backdrop-blur-sm border border-white/10">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Search */}
-                      <div className="relative">
-                        <div className="absolute left-1 top-1/2 transform -translate-y-1/2">
-                          <Search size={10} className="text-white/50" />
-                        </div>
-                        <input
-                          type="text"
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          placeholder="Search cartela number..."
-                          className="w-full text-sm pl-6 pr-6 py-2 bg-black/30 backdrop-blur-sm rounded-xl border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all"
-                        />
-                        {searchTerm && (
-                          <button
-                            onClick={clearSearch}
-                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/50 hover:text-white"
-                          >
-                            <XCircle size={20} />
-                          </button>
-                        )}
-                      </div>
-                      
-                      {/* Sort Controls */}
-                      <div className="flex items-center gap-3">
-                        <select
-                          value={sortBy}
-                          onChange={(e) => setSortBy(e.target.value as 'number' | 'availability')}
-                          className="w-22 text-sm px-2 py-2 bg-black/30 backdrop-blur-sm rounded-xl border border-white/20 text-white focus:outline-none focus:border-purple-500 transition-all"
-                        >
-                          <option value="number">Sort by Number</option>
-                          <option value="availability">Sort by Availability</option>
-                        </select>
-                        <button
-                          onClick={toggleSortOrder}
-                          className="px-4 py-3 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-xl border border-white/20 hover:bg-purple-500/30 transition-all"
-                          title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
-                        >
-                          {sortOrder === 'asc' ? (
-                            <SortNumericDown size={20} className="text-white" />
-                          ) : (
-                            <SortNumericUpAlt size={20} className="text-white" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Cartela Grid */}
-                <div className={`grid gap-3 ${
-                  viewMode === 'compact' 
-                    ? 'grid-cols-8 md:grid-cols-10 lg:grid-cols-12' 
-                    : 'grid-cols-6 md:grid-cols-8 lg:grid-cols-10'
-                } max-h-[400px] overflow-y-auto p-2 bg-gradient-to-br from-black/20 to-black/10 rounded-2xl`}>
-                  {filteredCartelas.length === 0 ? (
-                    <div className="col-span-full text-center py-10">
-                      <Search size={48} className="text-white/30 mx-auto mb-4" />
-                      <p className="text-white/50">No cartelas found</p>
-                    </div>
-                  ) : (
-                    filteredCartelas.map((cartela) => {
-                      const isWaiting = waitingCartelas[cartela.id];
-                      const isMyWaiting = isWaiting && isWaiting.userId === currentUser?.id;
-                      const isTakenByOther = isWaiting && !isMyWaiting;
-                      
-                      return (
-                        <div
-                          key={cartela.id}
-                          className={`relative group ${viewMode === 'compact' ? 'h-6' : 'h-6'} ring-2 ${
-                            isMyWaiting ? 'ring-yellow-400' : 
-                            isTakenByOther ? 'ring-orange-400' : 
-                            cartela.status === 'available' ? 'ring-green-400' : 'ring-red-400'
-                          } ring-offset-2 ring-offset-black/50`}
-                          onClick={() => {
-                            if (cartela.status === 'available' || isMyWaiting) {
-                              handleCartelaSelect(cartela);
-                            } else if (isTakenByOther) {
-                              alert(`Cartela ${cartela.cartela_number} is currently selected by ${isWaiting.username || 'another user'} (expires in ${Math.floor(isWaiting.expiresInSeconds / 60)}:${(isWaiting.expiresInSeconds % 60).toString().padStart(2, '0')})`);
-                            } else if (cartela.status === 'in_game') {
-                              alert(`Cartela ${cartela.cartela_number} is already in an active game`);
-                            }
-                          }}
-                        >
-                          <div className={`absolute inset-0 rounded-lg transition-all duration-300 ${
-                            isMyWaiting
-                              ? 'bg-gradient-to-br from-yellow-500/30 to-orange-500/30'
-                              : isTakenByOther
-                                ? 'bg-gradient-to-br from-orange-500/20 to-red-500/20'
-                                : cartela.status === 'available'
-                                  ? 'bg-gradient-to-br from-blue-500/20 to-purple-500/20 group-hover:from-blue-500/30 group-hover:to-purple-500/30'
-                                  : 'bg-gradient-to-br from-red-500/20 to-pink-500/20'
-                          } ${selectedCartela?.id === cartela.id ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-black/50' : ''}`}></div>
-                          
-                          <div className={`relative h-full flex items-center justify-center rounded-lg transition-all duration-300 ${
-                            selectedCartela?.id === cartela.id
-                              ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-black font-bold scale-105'
-                              : isMyWaiting
-                                ? 'bg-gradient-to-br from-yellow-500/50 to-orange-500/50 text-white font-bold'
-                                : isTakenByOther
-                                  ? 'bg-gradient-to-br from-orange-900/30 to-red-900/30 text-white/70'
-                                  : cartela.status === 'available'
-                                    ? 'bg-gradient-to-br from-white/10 to-white/5 text-white group-hover:bg-white/20 group-hover:scale-105'
-                                    : 'bg-gradient-to-br from-red-900/30 to-pink-900/30 text-white/50'
-                          } ${cartela.status !== 'available' && !isMyWaiting ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
-                            <span className={`${viewMode === 'compact' ? 'text-xs' : 'text-sm'} font-semibold`}>
-                              {cartela.cartela_number}
-                            </span>
-                            
-                            {isMyWaiting && waitingExpiryTime !== null && (
-                              <div className="absolute -top-3 -right-3 px-1.5 py-0.5 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full text-[10px] font-bold text-white animate-pulse shadow-lg">
-                                {Math.floor(waitingExpiryTime / 60)}:{(waitingExpiryTime % 60).toString().padStart(2, '0')}
-                              </div>
-                            )}
-                            
-                            {isTakenByOther && (
-                              <div className="absolute -top-2 -right-2 w-5 h-5 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center">
-                                <PersonCircle size={10} className="text-white" />
-                              </div>
-                            )}
-                            
-                            {cartela.status === 'in_game' && !isWaiting && (
-                              <div className="absolute -top-2 -right-2 w-5 h-5 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center">
-                                <XCircle size={10} className="text-white" />
-                              </div>
-                            )}
-                            
-                            {selectedCartela?.id === cartela.id && !isMyWaiting && (
-                              <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center animate-pulse shadow-lg">
-                                <StarFill size={12} className="text-white" />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-                
-                {/* Selection Actions */}
-                {selectedCartela && (
-                  <div className="mt-6 p-5 bg-gradient-to-r from-green-500/10 to-emerald-500/10 backdrop-blur-sm rounded-2xl border border-green-500/20">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="w-6 h-6 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center animate-pulse">
-                            <AwardFill size={6} className="text-white" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-bold text-white">
-                              Selected: <span className="text-xl text-yellow-300">{selectedCartela.cartela_number}</span>
-                            </p>
-                            {myWaitingCartela && waitingExpiryTime !== null && (
-                              <p className="text-xs text-yellow-300">
-                                Reserved for {Math.floor(waitingExpiryTime / 60)}:{(waitingExpiryTime % 60).toString().padStart(2, '0')}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex gap-3">
-                        <button
-                          onClick={releaseCartela}
-                          className="px-1 py-1 bg-gradient-to-r from-red-500/20 to-pink-500/20 text-white rounded-sm hover:bg-red-500/30 transition-all backdrop-blur-sm border border-red-500/20 flex items-center gap-2"
-                        >
-                          <XCircle size={10} /> Clear & Release
-                        </button>
-                        <button
-                          onClick={startMultiplayerGame}
-                          disabled={isLoading || !myWaitingCartela}
-                          className="px-2 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold rounded-xl hover:shadow-2xl hover:scale-105 transition-all disabled:opacity-50 backdrop-blur-sm flex items-center gap-2"
-                        >
-                          {isLoading ? (
-                            <>
-                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                              Joining Game...
-                            </>
-                          ) : (
-                            <>
-                              <PlayCircle size={15} /> 
-                              <span className="hidden md:inline">Start</span>
-                              <span className="md:hidden">Play Now</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              {/* Right Column - BINGO Card Preview */}
-              <div className="bg-gradient-to-br from-black-500/10 via-green-500/10 to-green-500/10 backdrop-blur-sm rounded-xl shadow-2xl p-5 md:p-6 border border-yellow-500/20">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                  <div className="flex items-center gap-3">
-                    <div className="w-6 h-6 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center">
-                      <CardChecklist size={14} className="text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-white">BINGO Card Preview</h3>
-                    </div>
-                  </div>
-                  
-                  {selectedCartela && (
-                    <div className="px-2 py-2 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full font-bold text-white shadow-lg">
-                      Cartela #{selectedCartela.cartela_number}
-                    </div>
-                  )}
-                </div>
-                
-                <div className="mb-4">
-                  {/* BINGO Letters Header */}
-                  <div className="grid grid-cols-5 mb-2">
-                    {['B', 'I', 'N', 'G', 'O'].map((letter, index) => (
-                      <div 
-                        key={letter}
-                        className="aspect-square bg-gradient-to-br from-purple-700 to-pink-700 rounded-xl flex items-center justify-center text-white text-sm md:text-sm font-bold shadow-sm relative overflow-hidden group"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <span className="relative">{letter}</span>
-                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-400 to-orange-400 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  {/* BINGO Card Grid */}
-                  <div className="grid grid-cols-5 gap-3 min-h-[300px]">
-                    {isLoading ? (
-                      <div className="col-span-5 flex items-center justify-center">
-                        <div className="text-center">
-                          <div className="relative">
-                            <div className="w-6 h-6 mx-auto mb-4">
-                              <div className="absolute inset-0 animate-ping rounded-full bg-gradient-to-r from-yellow-400 to-orange-500 opacity-20"></div>
-                              <div className="relative w-16 h-16 rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 flex items-center justify-center">
-                                <LightningChargeFill size={12} className="text-white animate-pulse" />
-                              </div>
-                            </div>
-                            <p className="text-white/80">Generating your lucky card...</p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : bingoCardNumbers.length > 0 ? (
-                      bingoCardNumbers.map((cellNumber, index) => (
-                        <div
-                          key={index}
-                          className={`relative group ${index === 12 ? 'free-space' : ''}`}
-                        >
-                          <div className={`absolute inset-0 rounded-xl transition-all duration-300 ${
-                            index === 12
-                              ? 'bg-gradient-to-br from-yellow-400 to-orange-500'
-                              : 'bg-gradient-to-br from-white/10 to-white/5 group-hover:bg-white/20'
-                          }`}></div>
-                          
-                          <div className={`relative aspect-square flex items-center justify-center rounded-xl transition-all duration-300 ${
-                            index === 12
-                              ? 'text-black font-bold text-lg'
-                              : 'text-white font-semibold text-lg group-hover:scale-110'
-                          }`}>
-                            {cellNumber}
-                            {index === 12 && (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-xs text-center px-2">FREE</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="col-span-5 flex items-center justify-center text-center">
-                        <div className="text-white/50">
-                          <div className="text-5xl mb-4 opacity-20 font-bold">BINGO</div>
-                          <p className="text-lg mb-2">Select a cartela to see</p>
-                          <p className="text-sm">your 5×5 BINGO card preview</p>
-                          <div className="mt-6">
-                            <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-full">
-                              <StarFill size={16} className="text-yellow-400" />
-                              <span className="text-sm">Multiplayer Ready</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Footer Security Info */}
-            {currentUser && (
-              <div className="mt-6 md:mt-8 p-4 md:p-5 bg-gradient-to-r from-green-500/10 to-emerald-500/10 backdrop-blur-sm rounded-2xl border border-green-500/20">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-6 h-6 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center">
-                      <ShieldCheck size={10} className="text-white" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-green-300">
-                        Playing as: {currentUser.firstName} • {Object.keys(waitingCartelas).length} cartelas waiting
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-sm text-white/70">
-                      Session ID: {currentUser.id?.substring(0, 8)}...
-                    </div>
-                    <button
-                      onClick={handleLogout}
-                      className="px-4 py-2 text-sm bg-gradient-to-r from-red-500/20 to-pink-500/20 text-white rounded-full hover:bg-red-500/30 transition-all"
+          {/* MAIN GRID */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            {/* LEFT - CARTELA SELECTION */}
+            <div className="bg-white rounded-3xl shadow-lg p-6 border border-green-100">
+              <h2 className="text-xl font-bold text-green-700 mb-4">
+                Select Your Cartela
+              </h2>
+
+              <div className="grid grid-cols-6 md:grid-cols-8 gap-3 max-h-[400px] overflow-y-auto">
+                {filteredCartelas.map((cartela) => {
+                  const isWaiting = waitingCartelas[cartela.id];
+                  const isMyWaiting = isWaiting && isWaiting.userId === currentUser?.id;
+                  const isTakenByOther = isWaiting && !isMyWaiting;
+
+                  return (
+                    <div
+                      key={cartela.id}
+                      onClick={() => {
+                        if (cartela.status === 'available' || isMyWaiting) {
+                          handleCartelaSelect(cartela);
+                        }
+                      }}
+                      className={`aspect-square flex items-center justify-center rounded-xl text-sm font-semibold transition cursor-pointer
+                        ${
+                          selectedCartela?.id === cartela.id
+                            ? 'bg-green-600 text-white shadow-lg scale-105'
+                            : cartela.status === 'available'
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                            : isTakenByOther
+                            ? 'bg-yellow-100 text-yellow-600'
+                            : 'bg-red-100 text-red-500'
+                        }`}
                     >
-                      Logout
-                    </button>
-                  </div>
+                      {cartela.cartela_number}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {selectedCartela && (
+                <div className="mt-6 p-4 bg-green-50 rounded-2xl flex justify-between items-center">
+                  <p className="text-green-700 font-semibold">
+                    Selected: {selectedCartela.cartela_number}
+                  </p>
+
+                  <button
+                    onClick={startMultiplayerGame}
+                    disabled={isLoading}
+                    className="px-6 py-2 bg-green-600 text-white rounded-xl shadow hover:shadow-lg transition disabled:opacity-50"
+                  >
+                    {isLoading ? 'Joining...' : 'Start Game'}
+                  </button>
                 </div>
-              </div>
-            )}
-          </>
-        ) : (
-          // Show loading message when game is being prepared
-          <div className="text-center py-20">
-            <div className="w-24 h-24 mx-auto mb-6">
-              <div className="absolute inset-0 animate-ping rounded-full bg-gradient-to-r from-green-500 to-emerald-500 opacity-20"></div>
-              <div className="relative w-24 h-24 rounded-full bg-gradient-to-r from-green-600 to-emerald-600 flex items-center justify-center">
-                <Stars size={40} className="text-white animate-pulse" />
-              </div>
+              )}
             </div>
-            <h3 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-300 to-emerald-300 mb-4">
-              Opening BINGO Game...
-            </h3>
-            <p className="text-white/80 text-lg">Please wait while we load your game</p>
-            <div className="mt-6">
-              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-400 mx-auto"></div>
+
+            {/* RIGHT - PREVIEW */}
+            <div className="bg-white rounded-3xl shadow-lg p-6 border border-green-100">
+              <h3 className="text-xl font-bold text-green-700 mb-6">
+                BINGO Card Preview
+              </h3>
+
+              <div className="grid grid-cols-5 gap-3">
+                {bingoCardNumbers.length > 0 ? (
+                  bingoCardNumbers.map((num, index) => (
+                    <div
+                      key={index}
+                      className={`aspect-square flex items-center justify-center rounded-xl font-bold text-lg
+                        ${
+                          index === 12
+                            ? 'bg-green-600 text-white'
+                            : 'bg-green-50 text-green-700'
+                        }`}
+                    >
+                      {index === 12 ? 'FREE' : num}
+                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-5 text-center text-green-400 py-12">
+                    Select a cartela to preview your card
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        )}
-      </div>
+
+          {/* FOOTER */}
+          {currentUser && (
+            <div className="mt-8 bg-white rounded-2xl p-4 border border-green-100 text-green-600 text-sm text-center">
+              Playing as {currentUser.firstName} • Session ID: {currentUser.id?.substring(0, 8)}...
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-center py-20 text-green-600 text-xl font-semibold">
+          Opening BINGO Game...
+        </div>
+      )}
     </div>
-  );
+  </div>
+);
 };
 
 export default CardPicker;
