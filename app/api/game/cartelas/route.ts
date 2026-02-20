@@ -1,4 +1,4 @@
-// app/api/game/cartelas/route.ts - UPDATED VERSION WITH WAITING STATE
+// app/api/game/cartelas/route.ts - COMPLETE UPDATED VERSION WITH DETERMINISTIC CARDS
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/mysql-db';
 
@@ -10,6 +10,134 @@ interface Cartela {
   status?: 'available' | 'waiting' | 'in_game';
   waiting_user_id?: string | null;
   waiting_expires_at?: string | null;
+}
+
+// Simple seeded random number generator class
+class SeededRandom {
+  private seed: number;
+
+  constructor(seed: number) {
+    this.seed = Math.abs(seed) || 1;
+  }
+
+  // Returns a random number between 0 and 1
+  next(): number {
+    this.seed = (this.seed * 9301 + 49297) % 233280;
+    return this.seed / 233280;
+  }
+
+  // Returns a random integer between min and max (inclusive)
+  nextInt(min: number, max: number): number {
+    return Math.floor(this.next() * (max - min + 1)) + min;
+  }
+}
+
+// Generate deterministic card based on cartela ID (1-400)
+function generateDeterministicCard(cartelaId: number) {
+  console.log('Generating deterministic card for cartela ID:', cartelaId);
+  
+  // Use the numeric ID with multiplier for better distribution
+  const seedValue = cartelaId * 99991;
+  const rng = new SeededRandom(seedValue);
+  
+  // BINGO ranges
+  const ranges = [
+    { min: 1, max: 15, letter: 'B' },
+    { min: 16, max: 30, letter: 'I' },
+    { min: 31, max: 45, letter: 'N' },
+    { min: 46, max: 60, letter: 'G' },
+    { min: 61, max: 75, letter: 'O' }
+  ];
+
+  const numbers: (number | string)[] = [];
+  const cardData = {
+    cartelaNumber: cartelaId,
+    numbers: [] as Array<{
+      number: number | string;
+      letter: string;
+      row: number;
+      col: number;
+      index: number;
+      isFree?: boolean;
+    }>,
+    columns: {} as {
+      B: number[];
+      I: number[];
+      N: (number | string)[];
+      G: number[];
+      O: number[];
+    }
+  };
+
+  // Generate numbers for each column using seeded random
+  for (let col = 0; col < 5; col++) {
+    const columnNumbers: number[] = [];
+    const range = ranges[col];
+    const columnKey = range.letter as keyof typeof cardData.columns;
+    cardData.columns[columnKey] = [];
+
+    // Generate 5 unique numbers for this column
+    while (columnNumbers.length < 5) {
+      const randomNum = rng.nextInt(range.min, range.max);
+      
+      if (!columnNumbers.includes(randomNum)) {
+        columnNumbers.push(randomNum);
+        (cardData.columns[columnKey] as number[]).push(randomNum);
+      }
+    }
+
+    // Sort numbers in ascending order
+    columnNumbers.sort((a, b) => a - b);
+
+    // Add to card
+    for (let row = 0; row < 5; row++) {
+      const index = row * 5 + col;
+      numbers.push(columnNumbers[row]);
+      
+      cardData.numbers.push({
+        number: columnNumbers[row],
+        letter: range.letter,
+        row,
+        col,
+        index
+      });
+    }
+  }
+
+  // Set the center cell as FREE (index 12 in a 5x5 grid)
+  numbers[12] = 'FREE';
+  cardData.numbers[12] = {
+    number: 'FREE',
+    letter: 'N',
+    row: 2,
+    col: 2,
+    isFree: true,
+    index: 12
+  };
+  
+  // Update N column to include FREE at the center position
+  cardData.columns.N = cardData.columns.N.map((num, idx) => idx === 2 ? 'FREE' : num);
+
+  return {
+    cartelaNumber: cartelaId,
+    numbers,
+    cardData
+  };
+}
+
+// Cache for generated cards to avoid regenerating
+const cardCache = new Map<number, any>();
+
+function getDeterministicCard(cartelaId: number) {
+  if (cardCache.has(cartelaId)) {
+    console.log('Cache hit for cartela:', cartelaId);
+    return cardCache.get(cartelaId);
+  }
+  
+  console.log('Cache miss for cartela:', cartelaId);
+  const card = generateDeterministicCard(cartelaId);
+  cardCache.set(cartelaId, card);
+  return card;
 }
 
 export async function GET() {
@@ -45,7 +173,8 @@ export async function GET() {
           THEN TIMESTAMPDIFF(SECOND, NOW(), cc.waiting_expires_at) 
           ELSE NULL 
         END as waiting_seconds_remaining,
-        u.username as waiting_username
+        u.username as waiting_username,
+        u.first_name as waiting_first_name
       FROM cartela_card cc
       LEFT JOIN users u ON cc.waiting_user_id = u.id
       ORDER BY cc.cartela_number
@@ -92,7 +221,6 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-
       return await handleSelectForWaiting(cartelaId, userId);
     }
 
@@ -103,20 +231,19 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-
       return await handleReleaseWaiting(cartelaId, userId);
     }
 
-    // For preview only - generate card data
+    // For preview only - generate deterministic card data
     if (generatePreview) {
-      console.log('POST /api/game/cartelas - Generating preview for cartelaId:', cartelaId);
+      console.log('POST /api/game/cartelas - Generating deterministic card for cartelaId:', cartelaId);
       
       // Check if cartela exists and is available or waiting
       const cartelaArray = await db.query(
         `SELECT id, cartela_number, status, waiting_user_id 
          FROM cartela_card WHERE id = ?`,
         [cartelaId]
-      ) as Cartela[];
+      ) as any[];
 
       if (cartelaArray.length === 0) {
         return NextResponse.json(
@@ -135,16 +262,18 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const previewCardData = generateBingoCardData(cartela.cartela_number);
+      // Generate deterministic card based on cartela ID
+      // This will ALWAYS produce the same card for this cartela ID
+      const deterministicCard = getDeterministicCard(cartelaId);
       
-      console.log('POST /api/game/cartelas - Preview generated successfully');
+      console.log('POST /api/game/cartelas - Deterministic card generated successfully for ID:', cartelaId);
       
       return NextResponse.json({
         success: true,
-        cardData: previewCardData,
+        cardData: deterministicCard.cardData,
         cartelaStatus: cartela.status,
         waitingUserId: cartela.waiting_user_id,
-        message: 'Bingo card generated successfully'
+        message: 'Deterministic bingo card generated successfully'
       });
     }
 
@@ -419,71 +548,4 @@ async function handleSaveGame(cartelaId: number, userId: string, cardData: any) 
       { status: 500 }
     );
   }
-}
-
-// Helper function to generate BINGO card data (unchanged)
-function generateBingoCardData(cartelaNumber: string) {
-  console.log('Generating BINGO card data for cartela:', cartelaNumber);
-  
-  // BINGO ranges
-  const ranges = [
-    { min: 1, max: 15, letter: 'B' },
-    { min: 16, max: 30, letter: 'I' },
-    { min: 31, max: 45, letter: 'N' },
-    { min: 46, max: 60, letter: 'G' },
-    { min: 61, max: 75, letter: 'O' }
-  ];
-
-  const numbers: (number | string)[] = [];
-  const cardData: any = {
-    cartelaNumber: cartelaNumber,
-    numbers: [],
-    columns: {},
-    generatedAt: new Date().toISOString()
-  };
-
-  // Generate numbers for each column
-  for (let col = 0; col < 5; col++) {
-    const columnNumbers: number[] = [];
-    const range = ranges[col];
-    cardData.columns[range.letter] = [];
-
-    // Generate 5 unique numbers for this column
-    while (columnNumbers.length < 5) {
-      const randomNum = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-      if (!columnNumbers.includes(randomNum)) {
-        columnNumbers.push(randomNum);
-        cardData.columns[range.letter].push(randomNum);
-      }
-    }
-
-    // Sort numbers
-    columnNumbers.sort((a, b) => a - b);
-
-    // Add column numbers to the card
-    for (let row = 0; row < 5; row++) {
-      numbers.push(columnNumbers[row]);
-      cardData.numbers.push({
-        number: columnNumbers[row],
-        letter: range.letter,
-        row,
-        col,
-        index: row * 5 + col
-      });
-    }
-  }
-
-  // Set the center cell as FREE
-  numbers[12] = 'FREE';
-  cardData.numbers[12] = {
-    number: 'FREE',
-    letter: 'N',
-    row: 2,
-    col: 2,
-    isFree: true,
-    index: 12
-  };
-
-  console.log('Generated card with', numbers.length, 'cells');
-  return cardData;
 }
