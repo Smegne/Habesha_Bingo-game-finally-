@@ -18,7 +18,6 @@ let botWebhookUrl: string | null = null
 export const bot = new Telegraf(BOT_TOKEN)
 
 // Simple in-memory session store (works for single instance)
-// For multiple instances, use Redis or database
 const sessionStore = new Map<string, {
   depositMethod?: 'telebirr' | 'cbe';
   depositAmount?: number;
@@ -66,18 +65,20 @@ function clearSession(ctx: Context) {
 
 // Set bot commands
 const commands = [
-  { command: 'start', description: 'Start' },
-  { command: 'register', description: 'Register' },
-  { command: 'play', description: 'Play' },
-  { command: 'deposit', description: 'Deposit' },
-  { command: 'balance', description: 'Balance' },
-  { command: 'withdraw', description: 'Withdrawal' },
-  { command: 'invite', description: 'Referral' },
-  { command: 'instructions', description: 'Instructions' },
-  { command: 'support', description: 'Support' },
-  { command: 'about', description: 'About' },
-  { command: 'debug', description: 'Debug deposit issues' },
-  { command: 'cancel', description: 'Cancel current operation' },
+  { command: 'start', description: '🏠 Start the bot' },
+  { command: 'register', description: '📝 Create new account' },
+  { command: 'play', description: '🎮 Play bingo game' },
+  { command: 'deposit', description: '💰 Add funds to wallet' },
+  { command: 'balance', description: '💳 Check your balance' },
+  { command: 'withdraw', description: '🏧 Withdraw your winnings' },
+  { command: 'invite', description: '👥 Refer friends & earn' },
+  { command: 'instructions', description: '📖 How to play' },
+  { command: 'support', description: '📞 Contact support' },
+  { command: 'about', description: 'ℹ️ About Habesha Bingo' },
+  { command: 'history', description: '📜 Transaction history' },
+  { command: 'profile', description: '👤 View your profile' },
+  { command: 'cancel', description: '❌ Cancel current operation' },
+  { command: 'menu', description: '📋 Show main menu' },
 ]
 
 // Initialize commands
@@ -160,85 +161,223 @@ export function getBotWebhookUrl(): string | null {
 // Cancel command
 bot.command('cancel', async (ctx) => {
   clearSession(ctx);
-  await ctx.reply('✅ Current operation cancelled. Use /deposit to start over.');
+  await ctx.reply(
+    '✅ Current operation cancelled.',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('📋 Main Menu', 'show_menu')]
+    ])
+  );
 })
 
-// Debug command to check deposit flow
-bot.command('debug', async (ctx) => {
-  const user = ctx.from
-  const session = getSession(ctx);
-  
-  await ctx.reply(
-    `🔍 **Debug Information**\n\n` +
-    `Environment: ${process.env.NODE_ENV}\n` +
-    `User ID: ${user.id}\n` +
-    `Username: ${user.username || 'N/A'}\n` +
-    `Chat ID: ${ctx.chat?.id}\n` +
-    `WebApp URL: ${process.env.NEXT_PUBLIC_WEBAPP_URL || 'Not set'}\n\n` +
-    `**Current Session:**\n` +
-    `• Has active session: ${session ? 'Yes' : 'No'}\n` +
-    `• Deposit Step: ${session?.depositStep || 'None'}\n` +
-    `• Amount: ${session?.depositAmount || 'Not set'}\n` +
-    `• Method: ${session?.depositMethod || 'Not set'}\n` +
-    `• Transaction Ref: ${session?.transactionRef || 'Not set'}\n\n` +
-    `**Deposit Flow Status:**\n` +
-    `• Screenshot: OPTIONAL (Vercel compatible)\n` +
-    `• Transaction Ref: REQUIRED\n` +
-    `• Works without file upload ✅\n\n` +
-    `If deposit fails, check:\n` +
-    `1. You're registered (/register)\n` +
-    `2. You have transaction reference\n` +
-    `3. Amount is at least 10 Birr`,
-    { parse_mode: 'Markdown' }
-  )
+// Menu command
+bot.command('menu', async (ctx) => {
+  await showMainMenu(ctx);
 })
+
+// Show main menu function
+async function showMainMenu(ctx: any) {
+  const user = ctx.from;
+  const isRegistered = await checkUserRegistered(user.id.toString());
+  
+  let welcomeText = `📋 **Main Menu**\n\n`;
+  
+  if (isRegistered) {
+    welcomeText += `Welcome back, ${user.first_name}! 👋\nChoose an option below:`;
+  } else {
+    welcomeText += `Welcome to Habesha Bingo, ${user.first_name}! 🎉\nPlease register first to start playing.`;
+  }
+  
+  const keyboard = isRegistered ? {
+    inline_keyboard: [
+      [
+        { text: '🎮 Play Game', callback_data: 'menu_play' },
+        { text: '💰 Deposit', callback_data: 'menu_deposit' }
+      ],
+      [
+        { text: '💳 Balance', callback_data: 'menu_balance' },
+        { text: '🏧 Withdraw', callback_data: 'menu_withdraw' }
+      ],
+      [
+        { text: '👥 Referrals', callback_data: 'menu_invite' },
+        { text: '📖 Instructions', callback_data: 'menu_instructions' }
+      ],
+      [
+        { text: '📜 History', callback_data: 'menu_history' },
+        { text: '👤 Profile', callback_data: 'menu_profile' }
+      ],
+      [
+        { text: '📞 Support', callback_data: 'menu_support' },
+        { text: 'ℹ️ About', callback_data: 'menu_about' }
+      ]
+    ]
+  } : {
+    inline_keyboard: [
+      [{ text: '📝 Register Now', callback_data: 'menu_register' }],
+      [{ text: '📖 Instructions', callback_data: 'menu_instructions' }],
+      [{ text: 'ℹ️ About', callback_data: 'menu_about' }]
+    ]
+  };
+  
+  await ctx.reply(welcomeText, {
+    parse_mode: 'Markdown',
+    reply_markup: keyboard
+  });
+}
+
+// Menu callbacks
+bot.action('show_menu', async (ctx) => {
+  await ctx.answerCbQuery();
+  await showMainMenu(ctx);
+});
+
+bot.action('menu_play', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executePlayCommand(ctx);
+});
+
+bot.action('menu_deposit', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeDepositCommand(ctx);
+});
+
+bot.action('menu_balance', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeBalanceCommand(ctx);
+});
+
+bot.action('menu_withdraw', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeWithdrawCommand(ctx);
+});
+
+bot.action('menu_invite', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeInviteCommand(ctx);
+});
+
+bot.action('menu_instructions', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeInstructionsCommand(ctx);
+});
+
+bot.action('menu_history', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeHistoryCommand(ctx);
+});
+
+bot.action('menu_profile', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeProfileCommand(ctx);
+});
+
+bot.action('menu_support', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeSupportCommand(ctx);
+});
+
+bot.action('menu_about', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeAboutCommand(ctx);
+});
+
+bot.action('menu_register', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeRegisterCommand(ctx);
+});
+
+// Helper function to check if user is registered
+async function checkUserRegistered(telegramId: string): Promise<boolean> {
+  try {
+    const users = await db.query(
+      'SELECT id FROM users WHERE telegram_id = ?',
+      [telegramId]
+    ) as any[];
+    return users && users.length > 0;
+  } catch (error) {
+    console.error('Error checking user registration:', error);
+    return false;
+  }
+}
+
+// Helper function to get user data
+async function getUserData(telegramId: string) {
+  try {
+    const users = await db.query(
+      'SELECT id, username, first_name, balance, bonus_balance, referral_code, role, created_at FROM users WHERE telegram_id = ?',
+      [telegramId]
+    ) as any[];
+    return users && users.length > 0 ? users[0] : null;
+  } catch (error) {
+    console.error('Error getting user data:', error);
+    return null;
+  }
+}
 
 // Start command
 bot.start(async (ctx) => {
-  const user = ctx.from
-  const referralCode = ctx.payload // Get referral code from start parameter
+  const user = ctx.from;
+  const referralCode = ctx.payload;
   
-  await ctx.reply(
-    `🎉 Welcome to Habesha Bingo, ${user.first_name}!\n\n` +
-    `🎮 Play exciting bingo games\n` +
-    `💰 Win real money prizes\n` +
-    `🎁 Get 50 Birr welcome bonus!\n\n` +
-    `Use /register to create your account${referralCode ? `\n\n🔑 Referral code detected: ${referralCode}` : ''}`,
-    // Markup.keyboard([
-    //   ['📋 Register', '🎮 Play'],
-    //   ['💰 Deposit', '🏧 Withdraw'],
-    //   ['👥 Invite', '📞 Support']
-    // ]).resize()
-  )
+  // Check if user is already registered
+  const isRegistered = await checkUserRegistered(user.id.toString());
+  
+  if (isRegistered) {
+    await ctx.reply(
+      `🎉 Welcome back to Habesha Bingo, ${user.first_name}!\n\n` +
+      `Use /menu to see all options or /play to start gaming!`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Show Menu', 'show_menu')],
+        [Markup.button.webApp('🎮 Play Now', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/')]
+      ])
+    );
+  } else {
+    await ctx.reply(
+      `🎉 Welcome to Habesha Bingo, ${user.first_name}!\n\n` +
+      `🎮 Play exciting bingo games\n` +
+      `💰 Win real money prizes\n` +
+      `🎁 Get 50 Birr welcome bonus!\n\n` +
+      `Use /register to create your account${referralCode ? `\n\n🔑 Referral code detected: ${referralCode}` : ''}`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📝 Register Now', 'menu_register')],
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
+  }
 })
 
-// Register command
-bot.command('register', async (ctx) => {
-  const user = ctx.from
+// Register command execution
+async function executeRegisterCommand(ctx: any) {
+  const user = ctx.from;
   
   try {
     // Check if user already exists
     const existingUser = await db.query(
       'SELECT id FROM users WHERE telegram_id = ?',
       [user.id.toString()]
-    ) as any[]
+    ) as any[];
     
     if (existingUser && existingUser.length > 0) {
-      await ctx.reply('✅ You are already registered! Use /play to start gaming.')
-      return
+      await ctx.reply(
+        '✅ You are already registered!',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🎮 Play Game', 'menu_play')],
+          [Markup.button.callback('📋 Main Menu', 'show_menu')]
+        ])
+      );
+      return;
     }
     
     // Generate unique referral code
-    let referralCode = ''
-    let isUnique = false
+    let referralCode = '';
+    let isUnique = false;
     
     while (!isUnique) {
-      referralCode = `HAB${user.id.toString().slice(-6)}${Date.now().toString(36).toUpperCase()}`
+      referralCode = `HAB${user.id.toString().slice(-6)}${Date.now().toString(36).toUpperCase()}`;
       const checkCode = await db.query(
         'SELECT id FROM users WHERE referral_code = ?',
         [referralCode]
-      ) as any[]
-      isUnique = !checkCode || checkCode.length === 0
+      ) as any[];
+      isUnique = !checkCode || checkCode.length === 0;
     }
     
     // Insert user into database
@@ -247,52 +386,187 @@ bot.command('register', async (ctx) => {
       (telegram_id, username, first_name, referral_code, is_online, last_active, balance, bonus_balance, role)
       VALUES (?, ?, ?, ?, TRUE, NOW(), 50, 10, 'user')`,
       [user.id.toString(), user.username || `user_${user.id}`, user.first_name, referralCode]
-    )
+    );
     
     // Success message
     await ctx.reply(
-      `✅ Registration Successful!\n\n` +
+      `✅ **Registration Successful!**\n\n` +
       `🎉 Welcome ${user.first_name} to Habesha Bingo!\n\n` +
-      `💰 You received 50 Birr welcome bonus!\n` +
-      `🎁 Plus 10 Birr bonus balance!\n\n` +
-      `🔑 Your Referral Code: ${referralCode}\n` +
+      `💰 You received **50 Birr** welcome bonus!\n` +
+      `🎁 Plus **10 Birr** bonus balance!\n\n` +
+      `🔑 Your Referral Code: \`${referralCode}\`\n` +
       `Share it to earn 10 Birr per friend!\n\n` +
-      `📱 Share: https://t.me/${ctx.botInfo.username}?start=${referralCode}\n\n` +
-      `🎮 Use /play to start gaming!`,
-      Markup.inlineKeyboard([
-        Markup.button.url('📱 Share on Telegram', 
-          `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${ctx.botInfo.username}?start=${referralCode}`)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}`),
-        Markup.button.webApp('🎮 Play Now', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/')
-      ])
-    )
+      `📱 Share: https://t.me/${ctx.botInfo.username}?start=${referralCode}`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📱 Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${ctx.botInfo.username}?start=${referralCode}`)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}` }],
+            [{ text: '🎮 Play Now', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/' } }],
+            [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+          ]
+        }
+      }
+    );
     
   } catch (error) {
-    console.error('Registration error:', error)
-    await ctx.reply('❌ Registration failed. Please try again or contact support.')
+    console.error('Registration error:', error);
+    await ctx.reply(
+      '❌ Registration failed. Please try again or contact support.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Try Again', 'menu_register')],
+        [Markup.button.callback('📞 Contact Support', 'menu_support')]
+      ])
+    );
   }
-})
+}
 
-// Play command - Opens Mini App
-bot.command('play', async (ctx) => {
+// Register command
+bot.command('register', async (ctx) => {
+  await executeRegisterCommand(ctx);
+});
+
+// Play command execution
+async function executePlayCommand(ctx: any) {
   const user = ctx.from;
   const webAppUrl = process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/';
   
-  // Create Mini App URL
+  // Check if user is registered
+  const isRegistered = await checkUserRegistered(user.id.toString());
+  
+  if (!isRegistered) {
+    await ctx.reply(
+      '❌ You need to register first!',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📝 Register Now', 'menu_register')]
+      ])
+    );
+    return;
+  }
+  
   const miniAppUrl = `${webAppUrl}?tgWebAppStartParam=play`;
   
   await ctx.reply(
-    '🎮 Opening Habesha Bingo Mini App...\n\n' +
+    '🎮 **Opening Habesha Bingo Mini App...**\n\n' +
     'Get ready to play and win! 🏆',
-    Markup.inlineKeyboard([
-      Markup.button.webApp('🎮 Play Habesha Bingo', miniAppUrl)
-    ])
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎮 Play Habesha Bingo', web_app: { url: miniAppUrl } }],
+          [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+        ]
+      }
+    }
   );
+}
+
+// Play command
+bot.command('play', async (ctx) => {
+  await executePlayCommand(ctx);
 });
 
-// DEPOSIT COMMAND - UPDATED FOR VERCEL
-bot.command('deposit', async (ctx) => {
+// Balance command execution
+async function executeBalanceCommand(ctx: any) {
+  try {
+    const user = ctx.from;
+    
+    // Check if user is registered
+    const isRegistered = await checkUserRegistered(user.id.toString());
+    
+    if (!isRegistered) {
+      await ctx.reply(
+        '❌ You are not registered. Use /register first.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📝 Register Now', 'menu_register')]
+        ])
+      );
+      return;
+    }
+    
+    // Get user balance from database
+    const userData = await getUserData(user.id.toString());
+    
+    if (!userData) {
+      await ctx.reply('❌ Error fetching user data. Please try again.');
+      return;
+    }
+    
+    // Get pending deposits
+    const pendingDeposits = await db.query(
+      'SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total FROM deposits WHERE user_id = ? AND status = "pending"',
+      [userData.id]
+    ) as any[];
+    
+    // Get pending withdrawals
+    const pendingWithdrawals = await db.query(
+      'SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE user_id = ? AND status = "pending"',
+      [userData.id]
+    ) as any[];
+    
+    const pendingDepositTotal = pendingDeposits[0]?.total || 0;
+    const pendingWithdrawalTotal = pendingWithdrawals[0]?.total || 0;
+    
+    await ctx.reply(
+      `💰 **Your Wallet**\n\n` +
+      `💳 **Main Balance:** *${userData.balance} Birr*\n` +
+      `🎁 **Bonus Balance:** *${userData.bonus_balance} Birr*\n` +
+      `🎯 **Total Balance:** *${userData.balance + userData.bonus_balance} Birr*\n\n` +
+      `⏳ **Pending Deposits:** *${pendingDepositTotal} Birr*\n` +
+      `⏳ **Pending Withdrawals:** *${pendingWithdrawalTotal} Birr*\n\n` +
+      `📊 **Statistics:**\n` +
+      `• Member since: ${new Date(userData.created_at).toLocaleDateString()}\n` +
+      `• Account type: ${userData.role === 'admin' ? '👑 Admin' : '👤 User'}`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '💰 Deposit', callback_data: 'menu_deposit' },
+              { text: '🏧 Withdraw', callback_data: 'menu_withdraw' }
+            ],
+            [
+              { text: '📜 History', callback_data: 'menu_history' },
+              { text: '📋 Main Menu', callback_data: 'show_menu' }
+            ]
+          ]
+        }
+      }
+    );
+  } catch (error) {
+    console.error('Balance error:', error);
+    await ctx.reply(
+      '❌ Error fetching balance. Please try again.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Try Again', 'menu_balance')],
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
+  }
+}
+
+// Balance command
+bot.command('balance', async (ctx) => {
+  await executeBalanceCommand(ctx);
+});
+
+// Deposit command execution
+async function executeDepositCommand(ctx: any) {
   // Clear any existing session
   clearSession(ctx);
+  
+  // Check if user is registered
+  const isRegistered = await checkUserRegistered(ctx.from.id.toString());
+  
+  if (!isRegistered) {
+    await ctx.reply(
+      '❌ You need to register first!',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📝 Register Now', 'menu_register')]
+      ])
+    );
+    return;
+  }
   
   await ctx.reply(
     '💵 **Deposit Funds**\n\n' +
@@ -303,14 +577,13 @@ bot.command('deposit', async (ctx) => {
     '🏦 **CBE Birr:**\n' +
     '• Account: 1000433547741\n' +
     '• Name: Simegnew Destaw\n\n' +
-    '**📝 NEW PROCESS (Vercel Compatible):**\n' +
+    '**📝 Process:**\n' +
     '1️⃣ Send money to any number above\n' +
     '2️⃣ **COPY the Transaction Reference/ID** from your payment app\n' +
     '3️⃣ Click the button below to submit\n\n' +
     '⚠️ **Minimum deposit:** 10 Birr\n' +
     '⏱️ **Approval:** Within 1-24 hours\n\n' +
-    '✅ **Screenshot is OPTIONAL - Transaction Reference is REQUIRED!**\n' +
-    '✅ Works even if screenshot upload fails',
+    '✅ **Screenshot is OPTIONAL - Transaction Reference is REQUIRED!**',
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -318,33 +591,21 @@ bot.command('deposit', async (ctx) => {
           [{ text: '📤 Submit Deposit with Reference', callback_data: 'start_deposit' }],
           [{ text: '💰 Quick Deposit via Web', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
           [{ text: '❓ How to get Transaction Ref?', callback_data: 'how_to_get_ref' }],
-          [{ text: '🔍 Check Session', callback_data: 'check_session' }]
+          [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
         ]
       }
     }
-  )
-})
+  );
+}
 
-// Check session
-bot.action('check_session', async (ctx) => {
-  await ctx.answerCbQuery()
-  const session = getSession(ctx);
-  
-  await ctx.reply(
-    `🔍 **Session Status**\n\n` +
-    `Has session: ${session ? '✅ Yes' : '❌ No'}\n` +
-    `Step: ${session?.depositStep || 'None'}\n` +
-    `Amount: ${session?.depositAmount || 'Not set'}\n` +
-    `Method: ${session?.depositMethod || 'Not set'}\n` +
-    `Transaction Ref: ${session?.transactionRef || 'Not set'}\n\n` +
-    `Use /cancel to clear session if stuck.`,
-    { parse_mode: 'Markdown' }
-  )
-})
+// Deposit command
+bot.command('deposit', async (ctx) => {
+  await executeDepositCommand(ctx);
+});
 
 // How to get transaction reference
 bot.action('how_to_get_ref', async (ctx) => {
-  await ctx.answerCbQuery()
+  await ctx.answerCbQuery();
   await ctx.reply(
     '🔑 **How to find Transaction Reference:**\n\n' +
     '📱 **TeleBirr:**\n' +
@@ -358,13 +619,20 @@ bot.action('how_to_get_ref', async (ctx) => {
     '📸 **If you can\'t find it:**\n' +
     '• Take a screenshot of the payment\n' +
     '• Send it and we\'ll extract the reference',
-    { parse_mode: 'Markdown' }
-  )
-})
+    { 
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📤 Start Deposit', callback_data: 'start_deposit' }]
+        ]
+      }
+    }
+  );
+});
 
 // Start deposit flow
 bot.action('start_deposit', async (ctx) => {
-  await ctx.answerCbQuery()
+  await ctx.answerCbQuery();
   
   // Initialize session
   updateSession(ctx, {
@@ -385,20 +653,25 @@ bot.action('start_deposit', async (ctx) => {
         ]
       }
     }
-  )
-})
+  );
+});
 
 // Cancel deposit
 bot.action('cancel_deposit', async (ctx) => {
-  await ctx.answerCbQuery()
-  clearSession(ctx)
-  await ctx.reply('❌ Deposit cancelled. Use /deposit to start over.')
-})
+  await ctx.answerCbQuery();
+  clearSession(ctx);
+  await ctx.reply(
+    '❌ Deposit cancelled.',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('📋 Main Menu', 'show_menu')]
+    ])
+  );
+});
 
 // Handle payment method selection
 bot.action(/deposit_method_(.+)/, async (ctx) => {
-  await ctx.answerCbQuery()
-  const method = ctx.match[1] as 'telebirr' | 'cbe'
+  await ctx.answerCbQuery();
+  const method = ctx.match[1] as 'telebirr' | 'cbe';
   
   // Store method in session
   updateSession(ctx, {
@@ -418,22 +691,17 @@ bot.action(/deposit_method_(.+)/, async (ctx) => {
         input_field_placeholder: 'Enter amount in Birr'
       }
     }
-  )
-})
+  );
+});
 
 // Handle text responses for deposit
 bot.on('text', async (ctx) => {
-  const text = ctx.message.text
+  const text = ctx.message.text;
   const session = getSession(ctx);
-  
-  // DEBUG: Log what's happening
-  console.log('📝 Text received:', text)
-  console.log('📝 Session state:', session)
-  console.log('📝 Reply to:', ctx.message.reply_to_message?.text)
   
   // Handle amount input (when replying to amount prompt)
   if (ctx.message.reply_to_message?.text?.includes('Step 2: Enter Amount')) {
-    const amount = parseFloat(text)
+    const amount = parseFloat(text);
     
     if (isNaN(amount) || amount < 10) {
       await ctx.reply(
@@ -444,8 +712,8 @@ bot.on('text', async (ctx) => {
           parse_mode: 'Markdown',
           reply_markup: { force_reply: true }
         }
-      )
-      return
+      );
+      return;
     }
     
     // Store amount in session
@@ -469,12 +737,12 @@ bot.on('text', async (ctx) => {
           input_field_placeholder: 'Enter transaction reference'
         }
       }
-    )
+    );
   }
   
   // Handle transaction reference input
   else if (ctx.message.reply_to_message?.text?.includes('Step 3: Enter Transaction Reference')) {
-    const transactionRef = text.trim()
+    const transactionRef = text.trim();
     
     if (!transactionRef || transactionRef.length < 3) {
       await ctx.reply(
@@ -484,31 +752,29 @@ bot.on('text', async (ctx) => {
           parse_mode: 'Markdown',
           reply_markup: { force_reply: true }
         }
-      )
-      return
+      );
+      return;
     }
     
     // Get stored data from session
-    const amount = session?.depositAmount
-    const method = session?.depositMethod
+    const amount = session?.depositAmount;
+    const method = session?.depositMethod;
     
     if (!amount || !method) {
       await ctx.reply(
         '❌ **Session expired**\n\n' +
-        'Your deposit session has expired. This happens on Vercel because sessions don\'t persist.\n\n' +
-        '**Please use the web app instead:**\n' +
-        'Click the button below for quick deposit that works every time!',
+        'Your deposit session has expired. Please start over.',
         {
           parse_mode: 'Markdown',
           reply_markup: {
             inline_keyboard: [
-              [{ text: '💰 Quick Deposit via Web', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
-              [{ text: '🔄 Try Bot Again', callback_data: 'start_deposit' }]
+              [{ text: '📤 Start New Deposit', callback_data: 'start_deposit' }],
+              [{ text: '💰 Use Web App', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }]
             ]
           }
         }
-      )
-      return
+      );
+      return;
     }
     
     // Store transaction ref in session
@@ -525,7 +791,6 @@ bot.on('text', async (ctx) => {
       `• Method: *${method === 'telebirr' ? '📱 TeleBirr' : '🏦 CBE Birr'}*\n` +
       `• Transaction Ref: *${transactionRef}*\n\n` +
       `📸 **Screenshot is OPTIONAL**\n\n` +
-      `*Since we're on Vercel, screenshot upload might fail sometimes.*\n` +
       `*Your deposit will be saved even without screenshot!*\n\n` +
       `Choose an option:`,
       {
@@ -538,14 +803,13 @@ bot.on('text', async (ctx) => {
           ]
         }
       }
-    )
+    );
   }
-})
+});
 
 // Handle screenshot upload option
 bot.action('deposit_upload_screenshot', async (ctx) => {
-  await ctx.answerCbQuery()
-  const session = getSession(ctx);
+  await ctx.answerCbQuery();
   
   updateSession(ctx, {
     depositStep: 'waiting_screenshot'
@@ -562,7 +826,7 @@ bot.action('deposit_upload_screenshot', async (ctx) => {
         force_reply: true
       }
     }
-  )
+  );
   
   // Set a timeout to auto-submit after 2 minutes
   setTimeout(async () => {
@@ -570,10 +834,10 @@ bot.action('deposit_upload_screenshot', async (ctx) => {
     if (currentSession?.depositStep === 'waiting_screenshot' && 
         currentSession?.depositAmount && 
         currentSession?.transactionRef) {
-      await submitDeposit(ctx, null, '⏱️ Auto-submitted (timeout)')
+      await submitDeposit(ctx, null, '⏱️ Auto-submitted (timeout)');
     }
-  }, 120000) // 2 minutes
-})
+  }, 120000); // 2 minutes
+});
 
 // Handle skip command
 bot.command('skip', async (ctx) => {
@@ -581,21 +845,21 @@ bot.command('skip', async (ctx) => {
   
   // Check if we're in deposit flow
   if (session?.depositAmount && session?.transactionRef) {
-    await submitDeposit(ctx, null, '⏭️ Skipped screenshot')
+    await submitDeposit(ctx, null, '⏭️ Skipped screenshot');
   } else {
-    await ctx.reply('No pending deposit to skip.')
+    await ctx.reply('No pending deposit to skip.');
   }
-})
+});
 
 // Submit without screenshot
 bot.action('deposit_submit_without_screenshot', async (ctx) => {
-  await ctx.answerCbQuery()
-  await submitDeposit(ctx, null, '✅ Submitted with reference only')
-})
+  await ctx.answerCbQuery();
+  await submitDeposit(ctx, null, '✅ Submitted with reference only');
+});
 
 // Handle photo upload (screenshot)
 bot.on('photo', async (ctx) => {
-  console.log('📸 Photo received from user:', ctx.from.id)
+  console.log('📸 Photo received from user:', ctx.from.id);
   const session = getSession(ctx);
   
   // Check if we're in deposit flow
@@ -606,31 +870,31 @@ bot.on('photo', async (ctx) => {
       Markup.inlineKeyboard([
         [{ text: '📤 Start Deposit', callback_data: 'start_deposit' }]
       ])
-    )
-    return
+    );
+    return;
   }
   
-  // Send typing indicator (user sees bot is processing)
-  await ctx.sendChatAction('typing')
+  // Send typing indicator
+  await ctx.sendChatAction('typing');
   
   try {
     // Get the largest photo (best quality)
-    const photo = ctx.message.photo[ctx.message.photo.length - 1]
-    const fileId = photo.file_id
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    const fileId = photo.file_id;
     
-    console.log('📸 Processing photo, file_id:', fileId)
+    console.log('📸 Processing photo, file_id:', fileId);
     
     // Get file URL from Telegram
-    const fileLink = await ctx.telegram.getFileLink(fileId)
-    const screenshotUrl = fileLink.href
+    const fileLink = await ctx.telegram.getFileLink(fileId);
+    const screenshotUrl = fileLink.href;
     
-    console.log('📸 Got file link:', screenshotUrl)
+    console.log('📸 Got file link:', screenshotUrl);
     
     // Submit deposit with screenshot
-    await submitDeposit(ctx, screenshotUrl, '📸 With screenshot')
+    await submitDeposit(ctx, screenshotUrl, '📸 With screenshot');
     
   } catch (error) {
-    console.error('❌ Screenshot upload error:', error)
+    console.error('❌ Screenshot upload error:', error);
     
     // Even if screenshot fails, still submit with reference only
     await ctx.reply(
@@ -638,71 +902,71 @@ bot.on('photo', async (ctx) => {
       `Error: ${error.message || 'Unknown error'}\n\n` +
       'But don\'t worry! Your deposit will still be processed using the transaction reference.',
       { parse_mode: 'Markdown' }
-    )
+    );
     
-    await submitDeposit(ctx, null, '⚠️ Screenshot failed - using ref only')
+    await submitDeposit(ctx, null, '⚠️ Screenshot failed - using ref only');
   }
-})
+});
 
 // Helper function to submit deposit
 async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote: string = '') {
   try {
     // Send typing indicator
-    await ctx.sendChatAction('typing')
+    await ctx.sendChatAction('typing');
     
     const session = getSession(ctx);
-    const telegramId = ctx.from.id.toString()
-    const amount = session?.depositAmount
-    const method = session?.depositMethod
-    const transactionRef = session?.transactionRef
+    const telegramId = ctx.from.id.toString();
+    const amount = session?.depositAmount;
+    const method = session?.depositMethod;
+    const transactionRef = session?.transactionRef;
     
-    console.log('💾 Submitting deposit:', { telegramId, amount, method, transactionRef, screenshotUrl, sourceNote })
+    console.log('💾 Submitting deposit:', { telegramId, amount, method, transactionRef, screenshotUrl, sourceNote });
     
     if (!amount || !method || !transactionRef) {
-      console.log('❌ Missing deposit info:', { amount, method, transactionRef })
+      console.log('❌ Missing deposit info:', { amount, method, transactionRef });
       await ctx.reply(
         '❌ **Missing deposit information**\n\n' +
         'Please start over with /deposit',
         Markup.inlineKeyboard([
           [{ text: '📤 Start New Deposit', callback_data: 'start_deposit' }],
-          [{ text: '💰 Use Web App Instead', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }]
+          [{ text: '💰 Use Web App', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }]
         ])
-      )
-      return
+      );
+      return;
     }
     
     // Get user's UUID from database
-    console.log('🔍 Looking up user by telegram_id:', telegramId)
+    console.log('🔍 Looking up user by telegram_id:', telegramId);
     const users = await db.query(
       'SELECT id, username, balance FROM users WHERE telegram_id = ?',
       [telegramId]
-    ) as any[]
+    ) as any[];
     
-    console.log('📊 User lookup result:', users)
+    console.log('📊 User lookup result:', users);
     
     if (!users || users.length === 0) {
       await ctx.reply(
         '❌ **You are not registered**\n\n' +
         'Please use /register first to create an account.',
         Markup.inlineKeyboard([
-          [{ text: '📝 Register Now', callback_data: 'start_register' }]
+          [{ text: '📝 Register Now', callback_data: 'menu_register' }]
         ])
-      )
-      return
+      );
+      return;
     }
     
-    const userUuid = users[0].id
+    const userUuid = users[0].id;
     
     // Insert deposit record - screenshot_url can be NULL
-    console.log('💾 Inserting deposit record...')
+    console.log('💾 Inserting deposit record...');
     const insertResult = await db.query(
       `INSERT INTO deposits 
       (user_id, amount, method, transaction_ref, screenshot_url, status) 
       VALUES (?, ?, ?, ?, ?, 'pending')`,
       [userUuid, amount, method, transactionRef, screenshotUrl]
-    )
+    );
     
-    console.log('✅ Deposit inserted successfully:', insertResult)
+    console.log('✅ Deposit inserted successfully:', insertResult);
     
     // Clear session after successful submission
     clearSession(ctx);
@@ -713,68 +977,75 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
       `💰 **Amount:** ${amount} Birr\n` +
       `🔑 **Transaction Ref:** \`${transactionRef}\`\n` +
       `📱 **Method:** ${method === 'telebirr' ? 'TeleBirr' : 'CBE Birr'}\n` +
-      `⏱️ **Status:** Pending Approval\n\n`
+      `⏱️ **Status:** Pending Approval\n\n`;
     
     if (screenshotUrl) {
-      successMessage += `📸 Screenshot received ✅\n`
+      successMessage += `📸 Screenshot received ✅\n`;
     } else {
-      successMessage += `📝 *Submitted with transaction reference only*\n`
+      successMessage += `📝 *Submitted with transaction reference only*\n`;
     }
     
     if (sourceNote) {
-      successMessage += `${sourceNote}\n`
+      successMessage += `${sourceNote}\n`;
     }
     
     successMessage += `\n**What happens next?**\n` +
       `1️⃣ Admin will verify your transaction using the reference number\n` +
       `2️⃣ If approved, balance will be added within 1-24 hours\n` +
-      `3️⃣ You'll receive a notification\n\n` +
-      `📞 Need help? Contact @HabeshaBingoSupport`
+      `3️⃣ You'll receive a notification`;
     
-    await ctx.reply(successMessage, { parse_mode: 'Markdown' })
+    await ctx.reply(successMessage, { 
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💳 Check Balance', callback_data: 'menu_balance' }],
+          [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+        ]
+      }
+    });
     
     // Notify admins
-    await notifyAdminsOfDeposit(ctx, userUuid, amount, method, transactionRef, screenshotUrl, users[0].username)
+    await notifyAdminsOfDeposit(ctx, userUuid, amount, method, transactionRef, screenshotUrl, users[0].username);
     
   } catch (error) {
-    console.error('❌ Deposit submission error:', error)
+    console.error('❌ Deposit submission error:', error);
     
     // Detailed error message for user
-    let errorMessage = '❌ **Failed to submit deposit**\n\n'
+    let errorMessage = '❌ **Failed to submit deposit**\n\n';
     
     if (error.code === 'ER_DUP_ENTRY') {
-      errorMessage += 'This transaction reference already exists in our system.\n\n'
+      errorMessage += 'This transaction reference already exists in our system.\n\n';
     } else if (error.code === 'ER_NO_REFERENCE') {
-      errorMessage += 'Database connection error.\n\n'
+      errorMessage += 'Database connection error.\n\n';
     } else {
-      errorMessage += `Error: ${error.message || 'Unknown error'}\n\n`
+      errorMessage += `Error: ${error.message || 'Unknown error'}\n\n`;
     }
     
     errorMessage += 'Please try again or use the web app.\n' +
-      'Save your transaction reference for manual verification.'
+      'Save your transaction reference for manual verification.';
     
     await ctx.reply(
       errorMessage,
       Markup.inlineKeyboard([
         [{ text: '🔄 Try Again', callback_data: 'start_deposit' }],
         [{ text: '💰 Use Web App', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
-        [{ text: '📞 Contact Support', url: 'https://t.me/HabeshaBingoSupport' }]
+        [{ text: '📞 Contact Support', callback_data: 'menu_support' }]
       ])
-    )
+    );
   }
 }
 
 // Notify admins
 async function notifyAdminsOfDeposit(ctx: any, userId: string, amount: number, method: string, transactionRef: string, screenshotUrl: string | null, username: string) {
   try {
-    console.log('🔔 Notifying admins...')
+    console.log('🔔 Notifying admins...');
     
     // Get admin chat IDs from database
     const admins = await db.query(
       'SELECT telegram_id FROM users WHERE role IN ("admin", "superadmin") AND telegram_id IS NOT NULL'
-    ) as any[]
+    ) as any[];
     
-    console.log(`👥 Found ${admins.length} admins to notify`)
+    console.log(`👥 Found ${admins.length} admins to notify`);
     
     for (const admin of admins) {
       try {
@@ -789,245 +1060,658 @@ async function notifyAdminsOfDeposit(ctx: any, userId: string, amount: number, m
           `🕐 Time: ${new Date().toLocaleString()}\n\n` +
           `Check admin panel to approve/reject.`,
           { parse_mode: 'Markdown' }
-        )
-        console.log(`✅ Notified admin: ${admin.telegram_id}`)
+        );
+        console.log(`✅ Notified admin: ${admin.telegram_id}`);
       } catch (e) {
-        console.error(`❌ Failed to notify admin ${admin.telegram_id}:`, e)
+        console.error(`❌ Failed to notify admin ${admin.telegram_id}:`, e);
       }
     }
   } catch (error) {
-    console.error('Admin notification error:', error)
+    console.error('Admin notification error:', error);
   }
 }
 
-// Balance command
-bot.command('balance', async (ctx) => {
+// Withdraw command execution
+async function executeWithdrawCommand(ctx: any) {
   try {
-    // Get user balance from database
-    const users = await db.query(
-      'SELECT balance, bonus_balance FROM users WHERE telegram_id = ?',
-      [ctx.from.id.toString()]
-    ) as any[]
+    const user = ctx.from;
     
-    if (!users || users.length === 0) {
-      await ctx.reply('❌ You are not registered. Use /register first.')
-      return
+    // Check if user is registered
+    const isRegistered = await checkUserRegistered(user.id.toString());
+    
+    if (!isRegistered) {
+      await ctx.reply(
+        '❌ You are not registered. Use /register first.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📝 Register Now', 'menu_register')]
+        ])
+      );
+      return;
     }
     
-    const user = users[0]
+    // Get user balance
+    const userData = await getUserData(user.id.toString());
     
     await ctx.reply(
-      `💰 **Your Wallet**\n\n` +
-      `💳 Main Balance: *${user.balance} Birr*\n` +
-      `🎁 Bonus Balance: *${user.bonus_balance} Birr*\n` +
-      `🎯 Total Balance: *${user.balance + user.bonus_balance} Birr*\n\n` +
-      `💸 Use /deposit to add funds\n` +
-      `🏧 Use /withdraw to cash out`,
+      `🏧 **Withdraw Funds**\n\n` +
+      `💰 **Available Balance:** *${userData.balance} Birr*\n` +
+      `📝 **Minimum Withdrawal:** 10 Birr\n` +
+      `⏱️ **Processing Time:** 1-24 hours\n\n` +
+      `**Please send in this format:**\n` +
+      `\`\`\`\nAmount\nAccount Number\n\`\`\`\n\n` +
+      `**Example:**\n` +
+      `\`\`\`\n50\n0911-123-4567\n\`\`\`\n\n` +
+      `⚠️ Make sure you have sufficient balance!`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
-          inline_keyboard: [
-            [{ text: '💸 Quick Deposit', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
-            [{ text: '🏧 Quick Withdraw', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/withdraw' } }]
-          ]
+          force_reply: true,
+          input_field_placeholder: 'Amount\nAccount Number'
         }
       }
-    )
+    );
   } catch (error) {
-    console.error('Balance error:', error)
-    await ctx.reply('❌ Error fetching balance. Please try again.')
+    console.error('Withdraw command error:', error);
+    await ctx.reply(
+      '❌ Error processing withdrawal request. Please try again.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Try Again', 'menu_withdraw')],
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
   }
-})
+}
 
 // Withdraw command
 bot.command('withdraw', async (ctx) => {
-  await ctx.reply(
-    '🏧 **Withdraw Funds**\n\n' +
-    '💰 Available Balance: Check /balance\n' +
-    '📝 Minimum Withdrawal: 10 Birr\n' +
-    '⏱️ Processing Time: 1-24 hours\n\n' +
-    'Please send:\n' +
-    '1️⃣ Amount (Birr)\n' +
-    '2️⃣ Account number\n\n' +
-    '**Example:**\n' +
-    '`50\n0911-123-4567`\n\n' +
-    'Send in this format:',
-    {
-      parse_mode: 'Markdown',
-      reply_markup: { force_reply: true }
-    }
-  )
-})
+  await executeWithdrawCommand(ctx);
+});
 
-// Invite command
-bot.command('invite', async (ctx) => {
+// Handle withdrawal text
+bot.on('text', async (ctx) => {
+  const text = ctx.message.text;
+  
+  // Handle withdrawal details
+  if (ctx.message.reply_to_message?.text?.includes('Withdraw Funds')) {
+    const lines = text.split('\n').filter(line => line.trim() !== '');
+    
+    if (lines.length < 2) {
+      await ctx.reply(
+        '❌ **Invalid format**\n\n' +
+        'Please send:\n' +
+        '`Amount\nAccountNumber`\n\n' +
+        'Example:\n' +
+        '`50\n0911-123-4567`',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { force_reply: true }
+        }
+      );
+      return;
+    }
+    
+    const amount = parseFloat(lines[0].trim());
+    const accountNumber = lines[1].trim();
+    
+    if (isNaN(amount) || amount < 10) {
+      await ctx.reply(
+        '❌ **Invalid amount**\n\n' +
+        'Minimum withdrawal is 10 Birr.',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { force_reply: true }
+        }
+      );
+      return;
+    }
+    
+    if (!accountNumber || accountNumber.length < 5) {
+      await ctx.reply(
+        '❌ **Invalid account number**\n\n' +
+        'Please enter a valid account number.',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { force_reply: true }
+        }
+      );
+      return;
+    }
+    
+    // Check if user has sufficient balance
+    try {
+      const users = await db.query(
+        'SELECT id, balance FROM users WHERE telegram_id = ?',
+        [ctx.from.id.toString()]
+      ) as any[];
+      
+      if (!users || users.length === 0) {
+        await ctx.reply(
+          '❌ You are not registered. Use /register first.',
+          Markup.inlineKeyboard([
+            [Markup.button.callback('📝 Register Now', 'menu_register')]
+          ])
+        );
+        return;
+      }
+      
+      if (users[0].balance < amount) {
+        await ctx.reply(
+          '❌ **Insufficient balance**\n\n' +
+          `Your balance: *${users[0].balance} Birr*\n` +
+          `Requested: *${amount} Birr*`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💰 Check Balance', callback_data: 'menu_balance' }],
+                [{ text: '💰 Deposit', callback_data: 'menu_deposit' }]
+              ]
+            }
+          }
+        );
+        return;
+      }
+      
+      // Create withdrawal record in database
+      await db.query(
+        'INSERT INTO withdrawals (user_id, amount, account_number, status, created_at) VALUES (?, ?, ?, "pending", NOW())',
+        [users[0].id, amount, accountNumber]
+      );
+      
+      await ctx.reply(
+        `✅ **Withdrawal Request Submitted!**\n\n` +
+        `💰 **Amount:** *${amount} Birr*\n` +
+        `📱 **Account:** \`${accountNumber}\`\n` +
+        `⏱️ **Status:** Pending Approval\n\n` +
+        `You'll be notified once approved.`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '💳 Check Balance', callback_data: 'menu_balance' }],
+              [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+            ]
+          }
+        }
+      );
+      
+      // Notify admins
+      const admins = await db.query(
+        'SELECT telegram_id FROM users WHERE role IN ("admin", "superadmin") AND telegram_id IS NOT NULL'
+      ) as any[];
+      
+      for (const admin of admins) {
+        try {
+          await ctx.telegram.sendMessage(
+            admin.telegram_id,
+            `🔔 **New Withdrawal Request**\n\n` +
+            `👤 User: ${ctx.from.username || ctx.from.first_name} (${users[0].id})\n` +
+            `💰 Amount: ${amount} Birr\n` +
+            `📱 Account: ${accountNumber}\n` +
+            `🕐 Time: ${new Date().toLocaleString()}`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (e) {
+          console.error('Failed to notify admin:', e);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Withdrawal error:', error);
+      await ctx.reply(
+        '❌ Failed to process withdrawal. Please try again.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Try Again', 'menu_withdraw')]
+        ])
+      );
+    }
+  }
+});
+
+// Invite command execution
+async function executeInviteCommand(ctx: any) {
   try {
+    const user = ctx.from;
+    
+    // Check if user is registered
+    const isRegistered = await checkUserRegistered(user.id.toString());
+    
+    if (!isRegistered) {
+      await ctx.reply(
+        '❌ You are not registered. Use /register first.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📝 Register Now', 'menu_register')]
+        ])
+      );
+      return;
+    }
+    
     // Get user's referral code from database
     const users = await db.query(
-      'SELECT referral_code FROM users WHERE telegram_id = ?',
-      [ctx.from.id.toString()]
-    ) as any[]
+      'SELECT id, referral_code FROM users WHERE telegram_id = ?',
+      [user.id.toString()]
+    ) as any[];
     
     if (!users || users.length === 0) {
-      await ctx.reply('❌ You are not registered. Use /register first.')
-      return
+      await ctx.reply('❌ Error fetching referral info. Please try again.');
+      return;
     }
     
-    const referralCode = users[0].referral_code
-    const referralLink = `https://t.me/${ctx.botInfo.username}?start=${referralCode}`
+    const referralCode = users[0].referral_code;
+    const userId = users[0].id;
+    const referralLink = `https://t.me/${ctx.botInfo.username}?start=${referralCode}`;
+    
+    // Get referral count and earnings
+    const referrals = await db.query(
+      'SELECT COUNT(*) as count, COALESCE(SUM(bonus_balance), 0) as total FROM users WHERE referred_by = ?',
+      [userId]
+    ) as any[];
+    
+    const referralCount = referrals[0]?.count || 0;
+    const referralEarnings = referralCount * 10; // 10 Birr per referral
     
     await ctx.reply(
       `👥 **Refer & Earn**\n\n` +
-      `🎁 Earn 10 Birr for each friend who joins!\n\n` +
-      `🔑 Your Referral Code: \`${referralCode}\`\n\n` +
-      `📱 Share this link:\n` +
+      `🎁 Earn **10 Birr** for each friend who joins!\n\n` +
+      `🔑 **Your Referral Code:** \`${referralCode}\`\n` +
+      `📊 **Total Referrals:** *${referralCount}*\n` +
+      `💰 **Total Earned:** *${referralEarnings} Birr*\n\n` +
+      `📱 **Share this link:**\n` +
       `${referralLink}`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
             [{ text: '📱 Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}` }],
-            [{ text: '📊 My Referrals', callback_data: 'view_referrals' }]
+            [{ text: '📊 View Referrals', callback_data: 'view_referrals' }],
+            [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
           ]
         }
       }
-    )
+    );
   } catch (error) {
-    console.error('Invite error:', error)
-    await ctx.reply('❌ Error fetching referral info. Please try again.')
+    console.error('Invite error:', error);
+    await ctx.reply(
+      '❌ Error fetching referral info. Please try again.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Try Again', 'menu_invite')],
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
   }
-})
+}
 
-// Callback handlers
-bot.action('submit_deposit', async (ctx) => {
-  await ctx.answerCbQuery()
-  await ctx.reply(
-    '📸 **Please send the payment screenshot**\n\n' +
-    'Or if you have transaction reference, use /deposit instead.',
-    { parse_mode: 'Markdown' }
-  )
-})
+// Invite command
+bot.command('invite', async (ctx) => {
+  await executeInviteCommand(ctx);
+});
 
+// View referrals callback
 bot.action('view_referrals', async (ctx) => {
-  await ctx.answerCbQuery()
+  await ctx.answerCbQuery();
+  
   try {
-    // Get referral count from database
-    const result = await db.query(
-      'SELECT COUNT(*) as count FROM users WHERE referred_by = (SELECT id FROM users WHERE telegram_id = ?)',
-      [ctx.from.id.toString()]
-    ) as any[]
+    const user = ctx.from;
     
-    const referralCount = result && result[0]?.count || 0
+    // Get user ID
+    const users = await db.query(
+      'SELECT id FROM users WHERE telegram_id = ?',
+      [user.id.toString()]
+    ) as any[];
     
-    await ctx.reply(
-      `📊 **Referral Statistics:**\n\n` +
-      `👥 Total Referrals: *${referralCount}*\n` +
-      `💰 Total Earned: *${referralCount * 10} Birr*\n` +
-      `🏆 Keep referring to earn more!`,
-      { parse_mode: 'Markdown' }
-    )
-  } catch (error) {
-    console.error('Referral stats error:', error)
-    await ctx.reply('❌ Error fetching referral statistics.')
-  }
-})
-
-// Handle photo for deposit (legacy)
-bot.on('photo', async (ctx) => {
-  // This is handled above, but keeping as fallback
-  const session = getSession(ctx);
-  if (!session?.depositAmount) {
-    await ctx.reply(
-      '📸 Screenshot received!\n\n' +
-      'To submit a deposit with this screenshot, please use /deposit command first.',
-      Markup.inlineKeyboard([
-        [{ text: '📤 Start Deposit', callback_data: 'start_deposit' }]
-      ])
-    )
-  }
-})
-
-// Handle text responses (legacy deposit flow - kept for backward compatibility)
-bot.on('text', async (ctx) => {
-  const text = ctx.message.text
-  
-  // Handle deposit amount (legacy)
-  if (ctx.message.reply_to_message?.text?.includes('deposit amount')) {
-    const amount = parseFloat(text)
-    
-    if (isNaN(amount) || amount < 10) {
-      await ctx.reply('❌ Invalid amount. Minimum deposit is 10 Birr.\nPlease use /deposit for the new flow.')
-      return
+    if (!users || users.length === 0) {
+      await ctx.reply('❌ You are not registered.');
+      return;
     }
     
-    await ctx.reply(
-      '⚠️ **Legacy deposit flow detected**\n\n' +
-      'Please use the new deposit flow with /deposit command.\n' +
-      'It requires transaction reference and works better on Vercel.',
-      Markup.inlineKeyboard([
-        [{ text: '📤 Use New Deposit Flow', callback_data: 'start_deposit' }]
-      ])
-    )
-  }
-  
-  // Handle withdrawal details
-  if (ctx.message.reply_to_message?.text?.includes('Withdraw Funds')) {
-    const lines = text.split('\n')
+    const userId = users[0].id;
     
-    if (lines.length < 2) {
-      await ctx.reply('❌ Invalid format. Please send:\nAmount\nAccountNumber')
-      return
-    }
+    // Get referrals list
+    const referrals = await db.query(
+      'SELECT username, first_name, created_at FROM users WHERE referred_by = ? ORDER BY created_at DESC LIMIT 10',
+      [userId]
+    ) as any[];
     
-    const amount = parseFloat(lines[0])
-    const accountNumber = lines[1].trim()
-    
-    if (isNaN(amount) || amount < 10) {
-      await ctx.reply('❌ Invalid amount. Minimum 10 Birr.')
-      return
-    }
-    
-    // Check if user has sufficient balance
-    try {
-      const users = await db.query(
-        'SELECT balance FROM users WHERE telegram_id = ?',
-        [ctx.from.id.toString()]
-      ) as any[]
-      
-      if (!users || users.length === 0) {
-        await ctx.reply('❌ You are not registered. Use /register first.')
-        return
-      }
-      
-      if (users[0].balance < amount) {
-        await ctx.reply('❌ Insufficient balance. Please check /balance')
-        return
-      }
-      
-      // Create withdrawal record in database
-      await db.query(
-        'INSERT INTO withdrawals (telegram_id, amount, account_number, status, created_at) VALUES (?, ?, ?, "pending", NOW())',
-        [ctx.from.id.toString(), amount, accountNumber]
-      )
-      
+    if (!referrals || referrals.length === 0) {
       await ctx.reply(
-        `✅ **Withdrawal Request Submitted!**\n\n` +
-        `💰 Amount: *${amount} Birr*\n` +
-        `📱 Account: \`${accountNumber}\`\n` +
-        `⏱️ Status: Pending approval\n\n` +
-        `You'll be notified once approved.`,
-        { parse_mode: 'Markdown' }
-      )
-    } catch (error) {
-      console.error('Withdrawal error:', error)
-      await ctx.reply('❌ Failed to process withdrawal. Please try again.')
+        '📊 **You haven\'t referred anyone yet.**\n\n' +
+        'Share your referral link to start earning!',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '👥 Get Referral Link', callback_data: 'menu_invite' }]
+            ]
+          }
+        }
+      );
+      return;
     }
+    
+    let referralList = '📊 **Your Referrals:**\n\n';
+    referrals.forEach((ref, index) => {
+      const name = ref.first_name || ref.username || 'Anonymous';
+      const date = new Date(ref.created_at).toLocaleDateString();
+      referralList += `${index + 1}. ${name} - ${date}\n`;
+    });
+    
+    if (referrals.length === 10) {
+      referralList += '\n*Showing last 10 referrals*';
+    }
+    
+    await ctx.reply(
+      referralList,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '👥 Back to Referral', callback_data: 'menu_invite' }],
+            [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+          ]
+        }
+      }
+    );
+  } catch (error) {
+    console.error('View referrals error:', error);
+    await ctx.reply('❌ Error fetching referrals.');
   }
-})
+});
+
+// Instructions command execution
+async function executeInstructionsCommand(ctx: any) {
+  await ctx.reply(
+    '📖 **How to Play Habesha Bingo**\n\n' +
+    '**Step 1: Register** 📝\n' +
+    '• Use /register to create your account\n' +
+    '• Get 50 Birr welcome bonus!\n\n' +
+    '**Step 2: Deposit** 💰\n' +
+    '• Use /deposit to add funds\n' +
+    '• Minimum deposit: 10 Birr\n' +
+    '• Pay via TeleBirr or CBE Birr\n\n' +
+    '**Step 3: Play** 🎮\n' +
+    '• Use /play to open the game\n' +
+    '• Buy bingo cards\n' +
+    '• Match numbers to win!\n\n' +
+    '**Step 4: Withdraw** 🏧\n' +
+    '• Use /withdraw to cash out\n' +
+    '• Minimum withdrawal: 10 Birr\n' +
+    '• Processing time: 1-24 hours\n\n' +
+    '**Referral Program** 👥\n' +
+    '• Earn 10 Birr per referral\n' +
+    '• Use /invite to get your link\n\n' +
+    '**Need Help?** 📞\n' +
+    '• Use /support to contact us',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎮 Play Now', callback_data: 'menu_play' }],
+          [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+        ]
+      }
+    }
+  );
+}
+
+// Instructions command
+bot.command('instructions', async (ctx) => {
+  await executeInstructionsCommand(ctx);
+});
+
+// Support command execution
+async function executeSupportCommand(ctx: any) {
+  await ctx.reply(
+    '📞 **Contact Support**\n\n' +
+    '**How can we help you?**\n\n' +
+    '• 💳 Deposit issues\n' +
+    '• 🏧 Withdrawal problems\n' +
+    '• 🎮 Game questions\n' +
+    '• 👤 Account issues\n' +
+    '• 💬 General inquiries\n\n' +
+    '**Contact methods:**\n\n' +
+    '📱 **Telegram:** @HabeshaBingoSupport\n' +
+    '📧 **Email:** support@habeshabingo.com\n' +
+    '⏱️ **Response time:** Within 24 hours\n\n' +
+    'Please include your User ID when contacting support.',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📱 Contact on Telegram', url: 'https://t.me/HabeshaBingoSupport' }],
+          [{ text: '📧 Send Email', url: 'mailto:support@habeshabingo.com' }],
+          [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+        ]
+      }
+    }
+  );
+}
+
+// Support command
+bot.command('support', async (ctx) => {
+  await executeSupportCommand(ctx);
+});
+
+// About command execution
+async function executeAboutCommand(ctx: any) {
+  await ctx.reply(
+    'ℹ️ **About Habesha Bingo**\n\n' +
+    '**Version:** 1.0.0\n' +
+    '**Developer:** DevVoltz\n' +
+    '**Released:** 2024\n\n' +
+    '**What is Habesha Bingo?**\n' +
+    'Habesha Bingo is an exciting online bingo platform where you can play and win real money prizes!\n\n' +
+    '**Features:**\n' +
+    '• 🎮 Multiple bingo game modes\n' +
+    '• 💰 Real money prizes\n' +
+    '• 👥 Referral program\n' +
+    '• 📱 Telegram Mini App integration\n' +
+    '• 🔒 Secure transactions\n\n' +
+    '**Why choose us?**\n' +
+    '• ✅ Licensed and regulated\n' +
+    '• ✅ Fast withdrawals\n' +
+    '• ✅ 24/7 customer support\n' +
+    '• ✅ Fair gameplay\n\n' +
+    'Thank you for choosing Habesha Bingo! 🎉',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎮 Start Playing', callback_data: 'menu_play' }],
+          [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+        ]
+      }
+    }
+  );
+}
+
+// About command
+bot.command('about', async (ctx) => {
+  await executeAboutCommand(ctx);
+});
+
+// History command execution
+async function executeHistoryCommand(ctx: any) {
+  try {
+    const user = ctx.from;
+    
+    // Check if user is registered
+    const isRegistered = await checkUserRegistered(user.id.toString());
+    
+    if (!isRegistered) {
+      await ctx.reply(
+        '❌ You are not registered. Use /register first.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📝 Register Now', 'menu_register')]
+        ])
+      );
+      return;
+    }
+    
+    // Get user ID
+    const users = await db.query(
+      'SELECT id FROM users WHERE telegram_id = ?',
+      [user.id.toString()]
+    ) as any[];
+    
+    if (!users || users.length === 0) {
+      await ctx.reply('❌ Error fetching user data.');
+      return;
+    }
+    
+    const userId = users[0].id;
+    
+    // Get recent deposits
+    const deposits = await db.query(
+      'SELECT amount, method, status, created_at FROM deposits WHERE user_id = ? ORDER BY created_at DESC LIMIT 5',
+      [userId]
+    ) as any[];
+    
+    // Get recent withdrawals
+    const withdrawals = await db.query(
+      'SELECT amount, status, created_at FROM withdrawals WHERE user_id = ? ORDER BY created_at DESC LIMIT 5',
+      [userId]
+    ) as any[];
+    
+    let historyText = '📜 **Transaction History**\n\n';
+    
+    historyText += '**Recent Deposits:**\n';
+    if (deposits && deposits.length > 0) {
+      deposits.forEach(dep => {
+        const date = new Date(dep.created_at).toLocaleDateString();
+        const statusEmoji = dep.status === 'approved' ? '✅' : dep.status === 'pending' ? '⏳' : '❌';
+        historyText += `${statusEmoji} ${dep.amount} Birr (${dep.method}) - ${date} - ${dep.status}\n`;
+      });
+    } else {
+      historyText += 'No deposits yet\n';
+    }
+    
+    historyText += '\n**Recent Withdrawals:**\n';
+    if (withdrawals && withdrawals.length > 0) {
+      withdrawals.forEach(wd => {
+        const date = new Date(wd.created_at).toLocaleDateString();
+        const statusEmoji = wd.status === 'approved' ? '✅' : wd.status === 'pending' ? '⏳' : '❌';
+        historyText += `${statusEmoji} ${wd.amount} Birr - ${date} - ${wd.status}\n`;
+      });
+    } else {
+      historyText += 'No withdrawals yet\n';
+    }
+    
+    await ctx.reply(
+      historyText,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💰 Make Deposit', callback_data: 'menu_deposit' }],
+            [{ text: '🏧 Make Withdrawal', callback_data: 'menu_withdraw' }],
+            [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+          ]
+        }
+      }
+    );
+  } catch (error) {
+    console.error('History error:', error);
+    await ctx.reply(
+      '❌ Error fetching transaction history.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
+  }
+}
+
+// History command
+bot.command('history', async (ctx) => {
+  await executeHistoryCommand(ctx);
+});
+
+// Profile command execution
+async function executeProfileCommand(ctx: any) {
+  try {
+    const user = ctx.from;
+    
+    // Check if user is registered
+    const isRegistered = await checkUserRegistered(user.id.toString());
+    
+    if (!isRegistered) {
+      await ctx.reply(
+        '❌ You are not registered. Use /register first.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📝 Register Now', 'menu_register')]
+        ])
+      );
+      return;
+    }
+    
+    // Get user data
+    const userData = await getUserData(user.id.toString());
+    
+    if (!userData) {
+      await ctx.reply('❌ Error fetching profile data.');
+      return;
+    }
+    
+    // Get statistics
+    const depositStats = await db.query(
+      'SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total FROM deposits WHERE user_id = ? AND status = "approved"',
+      [userData.id]
+    ) as any[];
+    
+    const withdrawalStats = await db.query(
+      'SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE user_id = ? AND status = "approved"',
+      [userData.id]
+    ) as any[];
+    
+    const gameStats = await db.query(
+      'SELECT COUNT(*) as games_played, COALESCE(SUM(win_amount), 0) as total_wins FROM game_history WHERE user_id = ?',
+      [userData.id]
+    ) as any[];
+    
+    await ctx.reply(
+      `👤 **Your Profile**\n\n` +
+      `**Personal Info:**\n` +
+      `• Name: ${userData.first_name}\n` +
+      `• Username: ${userData.username || 'Not set'}\n` +
+      `• User ID: \`${userData.id}\`\n` +
+      `• Member since: ${new Date(userData.created_at).toLocaleDateString()}\n` +
+      `• Account type: ${userData.role === 'admin' ? '👑 Admin' : '👤 User'}\n\n` +
+      `**Statistics:**\n` +
+      `• Total Deposits: ${depositStats[0]?.count || 0} (${depositStats[0]?.total || 0} Birr)\n` +
+      `• Total Withdrawals: ${withdrawalStats[0]?.count || 0} (${withdrawalStats[0]?.total || 0} Birr)\n` +
+      `• Games Played: ${gameStats[0]?.games_played || 0}\n` +
+      `• Total Winnings: ${gameStats[0]?.total_wins || 0} Birr\n\n` +
+      `**Referral Info:**\n` +
+      `• Referral Code: \`${userData.referral_code}\``,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📜 Transaction History', callback_data: 'menu_history' }],
+            [{ text: '👥 Referral Program', callback_data: 'menu_invite' }],
+            [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+          ]
+        }
+      }
+    );
+  } catch (error) {
+    console.error('Profile error:', error);
+    await ctx.reply(
+      '❌ Error fetching profile data.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
+  }
+}
+
+// Profile command
+bot.command('profile', async (ctx) => {
+  await executeProfileCommand(ctx);
+});
 
 // Error handling
 bot.catch((err: any, ctx: Context) => {
-  console.error(`❌ Error for ${ctx.updateType}:`, err)
+  console.error(`❌ Error for ${ctx.updateType}:`, err);
   
   // Send user-friendly error message
   ctx.reply(
@@ -1038,54 +1722,54 @@ bot.catch((err: any, ctx: Context) => {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '📞 Contact Support', url: 'https://t.me/HabeshaBingoSupport' }],
-          [{ text: '💰 Use Web App', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }]
+          [{ text: '📞 Contact Support', callback_data: 'menu_support' }],
+          [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
         ]
       }
     }
-  ).catch(e => console.error('Failed to send error message:', e))
-})
+  ).catch(e => console.error('Failed to send error message:', e));
+});
 
 // Start bot
 export async function startBot() {
   try {
-    console.log('🤖 Starting Habesha Bingo Bot...')
-    console.log('📝 Environment:', process.env.NODE_ENV)
-    console.log('📝 WebApp URL:', process.env.NEXT_PUBLIC_WEBAPP_URL)
+    console.log('🤖 Starting Habesha Bingo Bot...');
+    console.log('📝 Environment:', process.env.NODE_ENV);
+    console.log('📝 WebApp URL:', process.env.NEXT_PUBLIC_WEBAPP_URL);
     
     // Only try ngrok in development
     if (process.env.NODE_ENV === 'development') {
-      const tunnelUrl = await startNgrokTunnel(3000)
-      console.log(`✅ Ngrok URL: ${tunnelUrl}`)
+      const tunnelUrl = await startNgrokTunnel(3000);
+      console.log(`✅ Ngrok URL: ${tunnelUrl}`);
     } else {
       // In production, use the production webhook URL
-      const webhookUrl = `${process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com'}/api/webhook`
-      await bot.telegram.setWebhook(webhookUrl)
-      console.log(`✅ Production webhook set to: ${webhookUrl}`)
+      const webhookUrl = `${process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com'}/api/webhook`;
+      await bot.telegram.setWebhook(webhookUrl);
+      console.log(`✅ Production webhook set to: ${webhookUrl}`);
     }
     
     // Launch bot
-    await bot.launch()
-    console.log('✅ Bot is running!')
+    await bot.launch();
+    console.log('✅ Bot is running!');
     
     // Enable graceful stop
-    process.once('SIGINT', () => bot.stop('SIGINT'))
-    process.once('SIGTERM', () => bot.stop('SIGTERM'))
+    process.once('SIGINT', () => bot.stop('SIGINT'));
+    process.once('SIGTERM', () => bot.stop('SIGTERM'));
     
-    return bot
+    return bot;
   } catch (error) {
-    console.error('❌ Failed to start bot:', error)
-    throw error
+    console.error('❌ Failed to start bot:', error);
+    throw error;
   }
 }
 
 export async function stopBot() {
-  await bot.stop()
+  await bot.stop();
   if (process.env.NODE_ENV === 'development') {
-    await stopNgrokTunnel()
+    await stopNgrokTunnel();
   }
-  console.log('✅ Bot stopped')
+  console.log('✅ Bot stopped');
 }
 
 // Export bot for server-side use
-export { bot }
+export { bot };
