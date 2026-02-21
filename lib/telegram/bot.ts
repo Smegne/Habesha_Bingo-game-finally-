@@ -71,17 +71,17 @@ function isAdmin(telegramId: string): boolean {
 
 // Set bot commands
 const commands = [
-  { command: 'start', description: '🚀 Start the bot' },
-  { command: 'register', description: '📝 Register new account' },
-  { command: 'play', description: '🎮 Play bingo game' },
-  { command: 'deposit', description: '💰 Deposit funds' },
-  { command: 'balance', description: '💳 Check balance' },
-  { command: 'withdraw', description: '🏧 Withdraw funds' },
-  { command: 'invite', description: '👥 Referral program' },
+  { command: 'start', description: '🚀 Start' },
+  { command: 'register', description: '📝 Register' },
+  { command: 'play', description: '🎮 Play' },
+  { command: 'deposit', description: '💰 Deposit' },
+  { command: 'balance', description: '💳 balance' },
+  { command: 'withdraw', description: '🏧 Withdraw' },
+  { command: 'invite', description: '👥 Referral ' },
   { command: 'instructions', description: '📖 How to play' },
-  { command: 'history', description: '📜 Transaction history' },
-  { command: 'profile', description: '👤 View profile' },
-  { command: 'support', description: '📞 Contact support' },
+  { command: 'history', description: '📜 Transaction' },
+  { command: 'profile', description: '👤 profile' },
+  { command: 'support', description: '📞 support' },
   { command: 'about', description: 'ℹ️ About us' },
   { command: 'menu', description: '📋 Main menu' },
   { command: 'cancel', description: '❌ Cancel operation' },
@@ -897,7 +897,7 @@ async function executeBalanceCommand(ctx: any) {
     
     await ctx.reply(
       `💰 **Your Wallet**\n\n` +
-      `💳 **Main Balance is:** *${mainBalanceWithDeposits} Birr*\n` +
+      `💳 **Main Balance:** *${mainBalanceWithDeposits} Birr*\n` +
       `🎁 **Bonus Balance:** *${userData.bonus_balance} Birr*\n` +
       `🎯 **Total Balance:** *${mainBalanceWithDeposits + userData.bonus_balance} Birr*\n\n` +
       `📊 **Statistics:**\n` +
