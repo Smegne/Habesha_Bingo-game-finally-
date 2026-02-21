@@ -3,21 +3,9 @@
 import 'server-only'
 import { Telegraf, Markup, Context } from 'telegraf'
 import { message } from 'telegraf/filters'
-// Remove the direct ngrok import
-// import ngrok from '@ngrok/ngrok'
 
 // Import your existing database connection
 import { db } from '@/lib/mysql-db'
-
-// Extend Context to include session
-interface BotContext extends Context {
-  session?: {
-    depositMethod?: 'telebirr' | 'cbe';
-    depositAmount?: number;
-    transactionRef?: string;
-    depositStep?: string;
-  }
-}
 
 // We'll use dynamic import for ngrok
 let ngrok: any = null;
@@ -27,7 +15,54 @@ const NGROK_AUTH_TOKEN = process.env.NGROK_AUTH_TOKEN
 
 let ngrokUrl: string | null = null
 let botWebhookUrl: string | null = null
-export const bot = new Telegraf<BotContext>(BOT_TOKEN)
+export const bot = new Telegraf(BOT_TOKEN)
+
+// Simple in-memory session store (works for single instance)
+// For multiple instances, use Redis or database
+const sessionStore = new Map<string, {
+  depositMethod?: 'telebirr' | 'cbe';
+  depositAmount?: number;
+  transactionRef?: string;
+  depositStep?: string;
+  timestamp: number;
+}>();
+
+// Clean up old sessions every hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of sessionStore.entries()) {
+    if (now - value.timestamp > 30 * 60 * 1000) { // 30 minutes timeout
+      sessionStore.delete(key);
+    }
+  }
+}, 60 * 60 * 1000);
+
+// Helper to get session key
+function getSessionKey(ctx: Context): string {
+  return `${ctx.from?.id}:${ctx.chat?.id}`;
+}
+
+// Helper to get or create session
+function getSession(ctx: Context) {
+  const key = getSessionKey(ctx);
+  if (!sessionStore.has(key)) {
+    sessionStore.set(key, { timestamp: Date.now() });
+  }
+  return sessionStore.get(key)!;
+}
+
+// Helper to update session
+function updateSession(ctx: Context, data: Partial<any>) {
+  const key = getSessionKey(ctx);
+  const session = sessionStore.get(key) || { timestamp: Date.now() };
+  sessionStore.set(key, { ...session, ...data, timestamp: Date.now() });
+}
+
+// Helper to clear session
+function clearSession(ctx: Context) {
+  const key = getSessionKey(ctx);
+  sessionStore.delete(key);
+}
 
 // Set bot commands
 const commands = [
@@ -42,6 +77,7 @@ const commands = [
   { command: 'support', description: 'Support' },
   { command: 'about', description: 'About' },
   { command: 'debug', description: 'Debug deposit issues' },
+  { command: 'cancel', description: 'Cancel current operation' },
 ]
 
 // Initialize commands
@@ -121,15 +157,30 @@ export function getBotWebhookUrl(): string | null {
   return botWebhookUrl
 }
 
+// Cancel command
+bot.command('cancel', async (ctx) => {
+  clearSession(ctx);
+  await ctx.reply('✅ Current operation cancelled. Use /deposit to start over.');
+})
+
 // Debug command to check deposit flow
 bot.command('debug', async (ctx) => {
   const user = ctx.from
+  const session = getSession(ctx);
+  
   await ctx.reply(
     `🔍 **Debug Information**\n\n` +
     `Environment: ${process.env.NODE_ENV}\n` +
     `User ID: ${user.id}\n` +
     `Username: ${user.username || 'N/A'}\n` +
+    `Chat ID: ${ctx.chat?.id}\n` +
     `WebApp URL: ${process.env.NEXT_PUBLIC_WEBAPP_URL || 'Not set'}\n\n` +
+    `**Current Session:**\n` +
+    `• Has active session: ${session ? 'Yes' : 'No'}\n` +
+    `• Deposit Step: ${session?.depositStep || 'None'}\n` +
+    `• Amount: ${session?.depositAmount || 'Not set'}\n` +
+    `• Method: ${session?.depositMethod || 'Not set'}\n` +
+    `• Transaction Ref: ${session?.transactionRef || 'Not set'}\n\n` +
     `**Deposit Flow Status:**\n` +
     `• Screenshot: OPTIONAL (Vercel compatible)\n` +
     `• Transaction Ref: REQUIRED\n` +
@@ -240,6 +291,9 @@ bot.command('play', async (ctx) => {
 
 // DEPOSIT COMMAND - UPDATED FOR VERCEL
 bot.command('deposit', async (ctx) => {
+  // Clear any existing session
+  clearSession(ctx);
+  
   await ctx.reply(
     '💵 **Deposit Funds**\n\n' +
     '**Payment Methods:**\n\n' +
@@ -263,10 +317,28 @@ bot.command('deposit', async (ctx) => {
         inline_keyboard: [
           [{ text: '📤 Submit Deposit with Reference', callback_data: 'start_deposit' }],
           [{ text: '💰 Quick Deposit via Web', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
-          [{ text: '❓ How to get Transaction Ref?', callback_data: 'how_to_get_ref' }]
+          [{ text: '❓ How to get Transaction Ref?', callback_data: 'how_to_get_ref' }],
+          [{ text: '🔍 Check Session', callback_data: 'check_session' }]
         ]
       }
     }
+  )
+})
+
+// Check session
+bot.action('check_session', async (ctx) => {
+  await ctx.answerCbQuery()
+  const session = getSession(ctx);
+  
+  await ctx.reply(
+    `🔍 **Session Status**\n\n` +
+    `Has session: ${session ? '✅ Yes' : '❌ No'}\n` +
+    `Step: ${session?.depositStep || 'None'}\n` +
+    `Amount: ${session?.depositAmount || 'Not set'}\n` +
+    `Method: ${session?.depositMethod || 'Not set'}\n` +
+    `Transaction Ref: ${session?.transactionRef || 'Not set'}\n\n` +
+    `Use /cancel to clear session if stuck.`,
+    { parse_mode: 'Markdown' }
   )
 })
 
@@ -295,8 +367,10 @@ bot.action('start_deposit', async (ctx) => {
   await ctx.answerCbQuery()
   
   // Initialize session
-  ctx.session = {}
-  ctx.session.depositStep = 'method_selection'
+  updateSession(ctx, {
+    depositStep: 'method_selection',
+    timestamp: Date.now()
+  });
   
   await ctx.reply(
     '📝 **Step 1: Select Payment Method**\n\n' +
@@ -317,7 +391,7 @@ bot.action('start_deposit', async (ctx) => {
 // Cancel deposit
 bot.action('cancel_deposit', async (ctx) => {
   await ctx.answerCbQuery()
-  ctx.session = {}
+  clearSession(ctx)
   await ctx.reply('❌ Deposit cancelled. Use /deposit to start over.')
 })
 
@@ -327,9 +401,10 @@ bot.action(/deposit_method_(.+)/, async (ctx) => {
   const method = ctx.match[1] as 'telebirr' | 'cbe'
   
   // Store method in session
-  ctx.session = ctx.session || {}
-  ctx.session.depositMethod = method
-  ctx.session.depositStep = 'amount_input'
+  updateSession(ctx, {
+    depositMethod: method,
+    depositStep: 'amount_input'
+  });
   
   await ctx.reply(
     `💰 **Step 2: Enter Amount**\n\n` +
@@ -349,10 +424,11 @@ bot.action(/deposit_method_(.+)/, async (ctx) => {
 // Handle text responses for deposit
 bot.on('text', async (ctx) => {
   const text = ctx.message.text
+  const session = getSession(ctx);
   
   // DEBUG: Log what's happening
   console.log('📝 Text received:', text)
-  console.log('📝 Session state:', ctx.session)
+  console.log('📝 Session state:', session)
   console.log('📝 Reply to:', ctx.message.reply_to_message?.text)
   
   // Handle amount input (when replying to amount prompt)
@@ -373,9 +449,10 @@ bot.on('text', async (ctx) => {
     }
     
     // Store amount in session
-    ctx.session = ctx.session || {}
-    ctx.session.depositAmount = amount
-    ctx.session.depositStep = 'ref_input'
+    updateSession(ctx, {
+      depositAmount: amount,
+      depositStep: 'ref_input'
+    });
     
     // Ask for transaction reference
     await ctx.reply(
@@ -412,23 +489,33 @@ bot.on('text', async (ctx) => {
     }
     
     // Get stored data from session
-    const amount = ctx.session?.depositAmount
-    const method = ctx.session?.depositMethod
+    const amount = session?.depositAmount
+    const method = session?.depositMethod
     
     if (!amount || !method) {
       await ctx.reply(
         '❌ **Session expired**\n\n' +
-        'Your deposit session has expired. Please start over with /deposit',
-        Markup.inlineKeyboard([
-          [Markup.button.callback('📤 Start New Deposit', 'start_deposit')]
-        ])
+        'Your deposit session has expired. This happens on Vercel because sessions don\'t persist.\n\n' +
+        '**Please use the web app instead:**\n' +
+        'Click the button below for quick deposit that works every time!',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '💰 Quick Deposit via Web', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
+              [{ text: '🔄 Try Bot Again', callback_data: 'start_deposit' }]
+            ]
+          }
+        }
       )
       return
     }
     
     // Store transaction ref in session
-    ctx.session.transactionRef = transactionRef
-    ctx.session.depositStep = 'screenshot_option'
+    updateSession(ctx, {
+      transactionRef: transactionRef,
+      depositStep: 'screenshot_option'
+    });
     
     // Ask if they want to upload screenshot (optional)
     await ctx.reply(
@@ -458,8 +545,11 @@ bot.on('text', async (ctx) => {
 // Handle screenshot upload option
 bot.action('deposit_upload_screenshot', async (ctx) => {
   await ctx.answerCbQuery()
-  ctx.session = ctx.session || {}
-  ctx.session.depositStep = 'waiting_screenshot'
+  const session = getSession(ctx);
+  
+  updateSession(ctx, {
+    depositStep: 'waiting_screenshot'
+  });
   
   await ctx.reply(
     '📸 **Upload Screenshot (Optional)**\n\n' +
@@ -476,9 +566,10 @@ bot.action('deposit_upload_screenshot', async (ctx) => {
   
   // Set a timeout to auto-submit after 2 minutes
   setTimeout(async () => {
-    if (ctx.session?.depositStep === 'waiting_screenshot' && 
-        ctx.session?.depositAmount && 
-        ctx.session?.transactionRef) {
+    const currentSession = sessionStore.get(getSessionKey(ctx));
+    if (currentSession?.depositStep === 'waiting_screenshot' && 
+        currentSession?.depositAmount && 
+        currentSession?.transactionRef) {
       await submitDeposit(ctx, null, '⏱️ Auto-submitted (timeout)')
     }
   }, 120000) // 2 minutes
@@ -486,8 +577,10 @@ bot.action('deposit_upload_screenshot', async (ctx) => {
 
 // Handle skip command
 bot.command('skip', async (ctx) => {
+  const session = getSession(ctx);
+  
   // Check if we're in deposit flow
-  if (ctx.session?.depositAmount && ctx.session?.transactionRef) {
+  if (session?.depositAmount && session?.transactionRef) {
     await submitDeposit(ctx, null, '⏭️ Skipped screenshot')
   } else {
     await ctx.reply('No pending deposit to skip.')
@@ -503,14 +596,15 @@ bot.action('deposit_submit_without_screenshot', async (ctx) => {
 // Handle photo upload (screenshot)
 bot.on('photo', async (ctx) => {
   console.log('📸 Photo received from user:', ctx.from.id)
+  const session = getSession(ctx);
   
   // Check if we're in deposit flow
-  if (!ctx.session?.depositAmount || !ctx.session?.transactionRef) {
+  if (!session?.depositAmount || !session?.transactionRef) {
     await ctx.reply(
       '⚠️ No pending deposit found.\n\n' +
       'Please start a deposit first with /deposit',
       Markup.inlineKeyboard([
-        [Markup.button.callback('📤 Start Deposit', 'start_deposit')]
+        [{ text: '📤 Start Deposit', callback_data: 'start_deposit' }]
       ])
     )
     return
@@ -556,10 +650,11 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
     // Send typing indicator
     await ctx.sendChatAction('typing')
     
+    const session = getSession(ctx);
     const telegramId = ctx.from.id.toString()
-    const amount = ctx.session?.depositAmount
-    const method = ctx.session?.depositMethod
-    const transactionRef = ctx.session?.transactionRef
+    const amount = session?.depositAmount
+    const method = session?.depositMethod
+    const transactionRef = session?.transactionRef
     
     console.log('💾 Submitting deposit:', { telegramId, amount, method, transactionRef, screenshotUrl, sourceNote })
     
@@ -569,7 +664,8 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
         '❌ **Missing deposit information**\n\n' +
         'Please start over with /deposit',
         Markup.inlineKeyboard([
-          [Markup.button.callback('📤 Start New Deposit', 'start_deposit')]
+          [{ text: '📤 Start New Deposit', callback_data: 'start_deposit' }],
+          [{ text: '💰 Use Web App Instead', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }]
         ])
       )
       return
@@ -589,7 +685,7 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
         '❌ **You are not registered**\n\n' +
         'Please use /register first to create an account.',
         Markup.inlineKeyboard([
-          [Markup.button.callback('📝 Register Now', 'start_register')]
+          [{ text: '📝 Register Now', callback_data: 'start_register' }]
         ])
       )
       return
@@ -608,9 +704,8 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
     
     console.log('✅ Deposit inserted successfully:', insertResult)
     
-    // Clear session
-    const depositInfo = { ...ctx.session }
-    ctx.session = {}
+    // Clear session after successful submission
+    clearSession(ctx);
     
     // Success message
     let successMessage = 
@@ -655,14 +750,15 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
       errorMessage += `Error: ${error.message || 'Unknown error'}\n\n`
     }
     
-    errorMessage += 'Please try again or contact support.\n' +
+    errorMessage += 'Please try again or use the web app.\n' +
       'Save your transaction reference for manual verification.'
     
     await ctx.reply(
       errorMessage,
       Markup.inlineKeyboard([
-        [Markup.button.callback('🔄 Try Again', 'start_deposit')],
-        [Markup.button.url('📞 Contact Support', 'https://t.me/HabeshaBingoSupport')]
+        [{ text: '🔄 Try Again', callback_data: 'start_deposit' }],
+        [{ text: '💰 Use Web App', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
+        [{ text: '📞 Contact Support', url: 'https://t.me/HabeshaBingoSupport' }]
       ])
     )
   }
@@ -839,12 +935,13 @@ bot.action('view_referrals', async (ctx) => {
 // Handle photo for deposit (legacy)
 bot.on('photo', async (ctx) => {
   // This is handled above, but keeping as fallback
-  if (!ctx.session?.depositAmount) {
+  const session = getSession(ctx);
+  if (!session?.depositAmount) {
     await ctx.reply(
       '📸 Screenshot received!\n\n' +
       'To submit a deposit with this screenshot, please use /deposit command first.',
       Markup.inlineKeyboard([
-        [Markup.button.callback('📤 Start Deposit', 'start_deposit')]
+        [{ text: '📤 Start Deposit', callback_data: 'start_deposit' }]
       ])
     )
   }
@@ -868,7 +965,7 @@ bot.on('text', async (ctx) => {
       'Please use the new deposit flow with /deposit command.\n' +
       'It requires transaction reference and works better on Vercel.',
       Markup.inlineKeyboard([
-        [Markup.button.callback('📤 Use New Deposit Flow', 'start_deposit')]
+        [{ text: '📤 Use New Deposit Flow', callback_data: 'start_deposit' }]
       ])
     )
   }
@@ -929,7 +1026,7 @@ bot.on('text', async (ctx) => {
 })
 
 // Error handling
-bot.catch((err: any, ctx: BotContext) => {
+bot.catch((err: any, ctx: Context) => {
   console.error(`❌ Error for ${ctx.updateType}:`, err)
   
   // Send user-friendly error message
@@ -942,7 +1039,7 @@ bot.catch((err: any, ctx: BotContext) => {
       reply_markup: {
         inline_keyboard: [
           [{ text: '📞 Contact Support', url: 'https://t.me/HabeshaBingoSupport' }],
-          [{ text: '🔄 Try Again', callback_data: 'start_deposit' }]
+          [{ text: '💰 Use Web App', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }]
         ]
       }
     }
