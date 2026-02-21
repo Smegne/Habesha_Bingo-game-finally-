@@ -12,6 +12,7 @@ let ngrok: any = null;
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
 const NGROK_AUTH_TOKEN = process.env.NGROK_AUTH_TOKEN
+const ADMIN_IDS = process.env.ADMIN_TELEGRAM_IDS?.split(',') || [] // Comma-separated admin IDs
 
 let ngrokUrl: string | null = null
 let botWebhookUrl: string | null = null
@@ -63,6 +64,11 @@ function clearSession(ctx: Context) {
   sessionStore.delete(key);
 }
 
+// Helper to check if user is admin
+function isAdmin(telegramId: string): boolean {
+  return ADMIN_IDS.includes(telegramId);
+}
+
 // Set bot commands
 const commands = [
   { command: 'start', description: '🏠 Start the bot' },
@@ -80,6 +86,15 @@ const commands = [
   { command: 'cancel', description: '❌ Cancel current operation' },
   { command: 'menu', description: '📋 Show main menu' },
 ]
+
+// Admin commands (only visible to admins)
+if (ADMIN_IDS.length > 0) {
+  commands.push(
+    { command: 'admin', description: '👑 Admin panel' },
+    { command: 'pending_deposits', description: '⏳ View pending deposits' },
+    { command: 'pending_withdrawals', description: '⏳ View pending withdrawals' }
+  );
+}
 
 // Initialize commands
 bot.telegram.setMyCommands(commands)
@@ -1004,7 +1019,7 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
       }
     });
     
-    // Notify admins
+    // Notify admins about new deposit
     await notifyAdminsOfDeposit(ctx, userUuid, amount, method, transactionRef, screenshotUrl, users[0].username);
     
   } catch (error) {
@@ -1035,7 +1050,7 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
   }
 }
 
-// Notify admins
+// Notify admins about new deposit
 async function notifyAdminsOfDeposit(ctx: any, userId: string, amount: number, method: string, transactionRef: string, screenshotUrl: string | null, username: string) {
   try {
     console.log('🔔 Notifying admins...');
@@ -1058,7 +1073,10 @@ async function notifyAdminsOfDeposit(ctx: any, userId: string, amount: number, m
           `🔑 Transaction Ref: \`${transactionRef}\`\n` +
           `📸 Screenshot: ${screenshotUrl ? '✅ Uploaded' : '❌ Not provided'}\n` +
           `🕐 Time: ${new Date().toLocaleString()}\n\n` +
-          `Check admin panel to approve/reject.`,
+          `To approve, use:\n` +
+          `/approve_deposit ${transactionRef}\n\n` +
+          `To reject, use:\n` +
+          `/reject_deposit ${transactionRef}`,
           { parse_mode: 'Markdown' }
         );
         console.log(`✅ Notified admin: ${admin.telegram_id}`);
@@ -1070,6 +1088,551 @@ async function notifyAdminsOfDeposit(ctx: any, userId: string, amount: number, m
     console.error('Admin notification error:', error);
   }
 }
+
+// ==================== ADMIN COMMANDS ====================
+
+// Approve deposit command (admin only)
+bot.command('approve_deposit', async (ctx) => {
+  const user = ctx.from;
+  
+  // Check if user is admin
+  if (!isAdmin(user.id.toString())) {
+    await ctx.reply('❌ You are not authorized to use this command.');
+    return;
+  }
+  
+  const transactionRef = ctx.payload?.trim();
+  
+  if (!transactionRef) {
+    await ctx.reply(
+      '❌ Please provide a transaction reference.\n\n' +
+      'Usage: /approve_deposit TRANSACTION_REF'
+    );
+    return;
+  }
+  
+  try {
+    // Start a transaction
+    await db.query('START TRANSACTION');
+    
+    // Get deposit details
+    const deposits = await db.query(
+      `SELECT d.*, u.telegram_id, u.username, u.first_name 
+       FROM deposits d 
+       JOIN users u ON d.user_id = u.id 
+       WHERE d.transaction_ref = ? AND d.status = 'pending'`,
+      [transactionRef]
+    ) as any[];
+    
+    if (!deposits || deposits.length === 0) {
+      await db.query('ROLLBACK');
+      await ctx.reply('❌ No pending deposit found with that transaction reference.');
+      return;
+    }
+    
+    const deposit = deposits[0];
+    
+    // Get admin user ID
+    const admins = await db.query(
+      'SELECT id FROM users WHERE telegram_id = ?',
+      [user.id.toString()]
+    ) as any[];
+    
+    if (!admins || admins.length === 0) {
+      await db.query('ROLLBACK');
+      await ctx.reply('❌ Admin user not found in database.');
+      return;
+    }
+    
+    const adminId = admins[0].id;
+    
+    // Update deposit status to approved
+    await db.query(
+      `UPDATE deposits 
+       SET status = 'approved', approved_by = ?, approved_at = NOW() 
+       WHERE id = ?`,
+      [adminId, deposit.id]
+    );
+    
+    // Update user balance (add deposit amount)
+    await db.query(
+      `UPDATE users 
+       SET balance = balance + ?, updated_at = NOW() 
+       WHERE id = ?`,
+      [deposit.amount, deposit.user_id]
+    );
+    
+    // Commit transaction
+    await db.query('COMMIT');
+    
+    // Notify user
+    try {
+      await ctx.telegram.sendMessage(
+        deposit.telegram_id,
+        `✅ **Deposit Approved!**\n\n` +
+        `💰 Amount: *${deposit.amount} Birr*\n` +
+        `🔑 Transaction Ref: \`${deposit.transaction_ref}\`\n` +
+        `📱 Method: ${deposit.method}\n\n` +
+        `Your balance has been updated. Use /balance to check.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (e) {
+      console.error('Failed to notify user:', e);
+    }
+    
+    await ctx.reply(
+      `✅ **Deposit Approved!**\n\n` +
+      `💰 Amount: ${deposit.amount} Birr\n` +
+      `👤 User: ${deposit.first_name} (@${deposit.username || 'N/A'})\n` +
+      `🔑 Transaction Ref: \`${deposit.transaction_ref}\`\n\n` +
+      `User has been notified.`,
+      { parse_mode: 'Markdown' }
+    );
+    
+  } catch (error) {
+    await db.query('ROLLBACK');
+    console.error('Approve deposit error:', error);
+    await ctx.reply('❌ Error approving deposit. Please try again.');
+  }
+});
+
+// Reject deposit command (admin only)
+bot.command('reject_deposit', async (ctx) => {
+  const user = ctx.from;
+  
+  // Check if user is admin
+  if (!isAdmin(user.id.toString())) {
+    await ctx.reply('❌ You are not authorized to use this command.');
+    return;
+  }
+  
+  const transactionRef = ctx.payload?.trim();
+  
+  if (!transactionRef) {
+    await ctx.reply(
+      '❌ Please provide a transaction reference.\n\n' +
+      'Usage: /reject_deposit TRANSACTION_REF'
+    );
+    return;
+  }
+  
+  try {
+    // Get deposit details
+    const deposits = await db.query(
+      `SELECT d.*, u.telegram_id, u.username, u.first_name 
+       FROM deposits d 
+       JOIN users u ON d.user_id = u.id 
+       WHERE d.transaction_ref = ? AND d.status = 'pending'`,
+      [transactionRef]
+    ) as any[];
+    
+    if (!deposits || deposits.length === 0) {
+      await ctx.reply('❌ No pending deposit found with that transaction reference.');
+      return;
+    }
+    
+    const deposit = deposits[0];
+    
+    // Update deposit status to rejected
+    await db.query(
+      `UPDATE deposits 
+       SET status = 'rejected' 
+       WHERE id = ?`,
+      [deposit.id]
+    );
+    
+    // Notify user
+    try {
+      await ctx.telegram.sendMessage(
+        deposit.telegram_id,
+        `❌ **Deposit Rejected**\n\n` +
+        `💰 Amount: *${deposit.amount} Birr*\n` +
+        `🔑 Transaction Ref: \`${deposit.transaction_ref}\`\n` +
+        `📱 Method: ${deposit.method}\n\n` +
+        `Please contact support for more information.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (e) {
+      console.error('Failed to notify user:', e);
+    }
+    
+    await ctx.reply(
+      `✅ **Deposit Rejected!**\n\n` +
+      `💰 Amount: ${deposit.amount} Birr\n` +
+      `👤 User: ${deposit.first_name} (@${deposit.username || 'N/A'})\n` +
+      `🔑 Transaction Ref: \`${deposit.transaction_ref}\``,
+      { parse_mode: 'Markdown' }
+    );
+    
+  } catch (error) {
+    console.error('Reject deposit error:', error);
+    await ctx.reply('❌ Error rejecting deposit. Please try again.');
+  }
+});
+
+// Approve withdrawal command (admin only)
+bot.command('approve_withdrawal', async (ctx) => {
+  const user = ctx.from;
+  
+  // Check if user is admin
+  if (!isAdmin(user.id.toString())) {
+    await ctx.reply('❌ You are not authorized to use this command.');
+    return;
+  }
+  
+  const withdrawalId = ctx.payload?.trim();
+  
+  if (!withdrawalId) {
+    await ctx.reply(
+      '❌ Please provide a withdrawal ID.\n\n' +
+      'Usage: /approve_withdrawal WITHDRAWAL_ID'
+    );
+    return;
+  }
+  
+  try {
+    // Start a transaction
+    await db.query('START TRANSACTION');
+    
+    // Get withdrawal details
+    const withdrawals = await db.query(
+      `SELECT w.*, u.telegram_id, u.username, u.first_name, u.balance 
+       FROM withdrawals w 
+       JOIN users u ON w.user_id = u.id 
+       WHERE w.id = ? AND w.status = 'pending'`,
+      [withdrawalId]
+    ) as any[];
+    
+    if (!withdrawals || withdrawals.length === 0) {
+      await db.query('ROLLBACK');
+      await ctx.reply('❌ No pending withdrawal found with that ID.');
+      return;
+    }
+    
+    const withdrawal = withdrawals[0];
+    
+    // Check if user has sufficient balance
+    if (withdrawal.balance < withdrawal.amount) {
+      await db.query('ROLLBACK');
+      await ctx.reply(
+        `❌ Insufficient balance for this withdrawal.\n\n` +
+        `User balance: ${withdrawal.balance} Birr\n` +
+        `Withdrawal amount: ${withdrawal.amount} Birr`
+      );
+      return;
+    }
+    
+    // Get admin user ID
+    const admins = await db.query(
+      'SELECT id FROM users WHERE telegram_id = ?',
+      [user.id.toString()]
+    ) as any[];
+    
+    if (!admins || admins.length === 0) {
+      await db.query('ROLLBACK');
+      await ctx.reply('❌ Admin user not found in database.');
+      return;
+    }
+    
+    const adminId = admins[0].id;
+    
+    // Update withdrawal status to approved
+    await db.query(
+      `UPDATE withdrawals 
+       SET status = 'approved', approved_by = ?, approved_at = NOW() 
+       WHERE id = ?`,
+      [adminId, withdrawal.id]
+    );
+    
+    // Update user balance (subtract withdrawal amount)
+    await db.query(
+      `UPDATE users 
+       SET balance = balance - ?, updated_at = NOW() 
+       WHERE id = ?`,
+      [withdrawal.amount, withdrawal.user_id]
+    );
+    
+    // Commit transaction
+    await db.query('COMMIT');
+    
+    // Notify user
+    try {
+      await ctx.telegram.sendMessage(
+        withdrawal.telegram_id,
+        `✅ **Withdrawal Approved!**\n\n` +
+        `💰 Amount: *${withdrawal.amount} Birr*\n` +
+        `📱 Account: \`${withdrawal.account_number}\`\n\n` +
+        `The amount has been sent to your account.\n` +
+        `Use /balance to check your updated balance.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (e) {
+      console.error('Failed to notify user:', e);
+    }
+    
+    await ctx.reply(
+      `✅ **Withdrawal Approved!**\n\n` +
+      `💰 Amount: ${withdrawal.amount} Birr\n` +
+      `👤 User: ${withdrawal.first_name} (@${withdrawal.username || 'N/A'})\n` +
+      `📱 Account: \`${withdrawal.account_number}\`\n\n` +
+      `User has been notified.`,
+      { parse_mode: 'Markdown' }
+    );
+    
+  } catch (error) {
+    await db.query('ROLLBACK');
+    console.error('Approve withdrawal error:', error);
+    await ctx.reply('❌ Error approving withdrawal. Please try again.');
+  }
+});
+
+// Reject withdrawal command (admin only)
+bot.command('reject_withdrawal', async (ctx) => {
+  const user = ctx.from;
+  
+  // Check if user is admin
+  if (!isAdmin(user.id.toString())) {
+    await ctx.reply('❌ You are not authorized to use this command.');
+    return;
+  }
+  
+  const withdrawalId = ctx.payload?.trim();
+  
+  if (!withdrawalId) {
+    await ctx.reply(
+      '❌ Please provide a withdrawal ID.\n\n' +
+      'Usage: /reject_withdrawal WITHDRAWAL_ID'
+    );
+    return;
+  }
+  
+  try {
+    // Get withdrawal details
+    const withdrawals = await db.query(
+      `SELECT w.*, u.telegram_id, u.username, u.first_name 
+       FROM withdrawals w 
+       JOIN users u ON w.user_id = u.id 
+       WHERE w.id = ? AND w.status = 'pending'`,
+      [withdrawalId]
+    ) as any[];
+    
+    if (!withdrawals || withdrawals.length === 0) {
+      await ctx.reply('❌ No pending withdrawal found with that ID.');
+      return;
+    }
+    
+    const withdrawal = withdrawals[0];
+    
+    // Update withdrawal status to rejected
+    await db.query(
+      `UPDATE withdrawals 
+       SET status = 'rejected' 
+       WHERE id = ?`,
+      [withdrawal.id]
+    );
+    
+    // Notify user
+    try {
+      await ctx.telegram.sendMessage(
+        withdrawal.telegram_id,
+        `❌ **Withdrawal Rejected**\n\n` +
+        `💰 Amount: *${withdrawal.amount} Birr*\n` +
+        `📱 Account: \`${withdrawal.account_number}\`\n\n` +
+        `Please contact support for more information.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (e) {
+      console.error('Failed to notify user:', e);
+    }
+    
+    await ctx.reply(
+      `✅ **Withdrawal Rejected!**\n\n` +
+      `💰 Amount: ${withdrawal.amount} Birr\n` +
+      `👤 User: ${withdrawal.first_name} (@${withdrawal.username || 'N/A'})\n` +
+      `📱 Account: \`${withdrawal.account_number}\``,
+      { parse_mode: 'Markdown' }
+    );
+    
+  } catch (error) {
+    console.error('Reject withdrawal error:', error);
+    await ctx.reply('❌ Error rejecting withdrawal. Please try again.');
+  }
+});
+
+// Admin panel command
+bot.command('admin', async (ctx) => {
+  const user = ctx.from;
+  
+  // Check if user is admin
+  if (!isAdmin(user.id.toString())) {
+    await ctx.reply('❌ You are not authorized to use this command.');
+    return;
+  }
+  
+  // Get pending counts
+  const pendingDeposits = await db.query(
+    'SELECT COUNT(*) as count FROM deposits WHERE status = "pending"'
+  ) as any[];
+  
+  const pendingWithdrawals = await db.query(
+    'SELECT COUNT(*) as count FROM withdrawals WHERE status = "pending"'
+  ) as any[];
+  
+  await ctx.reply(
+    `👑 **Admin Panel**\n\n` +
+    `**Pending Transactions:**\n` +
+    `• Deposits: ${pendingDeposits[0]?.count || 0}\n` +
+    `• Withdrawals: ${pendingWithdrawals[0]?.count || 0}\n\n` +
+    `**Admin Commands:**\n` +
+    `• /pending_deposits - View pending deposits\n` +
+    `• /pending_withdrawals - View pending withdrawals\n` +
+    `• /approve_deposit [ref] - Approve deposit\n` +
+    `• /reject_deposit [ref] - Reject deposit\n` +
+    `• /approve_withdrawal [id] - Approve withdrawal\n` +
+    `• /reject_withdrawal [id] - Reject withdrawal`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '⏳ Pending Deposits', callback_data: 'admin_pending_deposits' }],
+          [{ text: '⏳ Pending Withdrawals', callback_data: 'admin_pending_withdrawals' }]
+        ]
+      }
+    }
+  );
+});
+
+// Pending deposits command
+bot.command('pending_deposits', async (ctx) => {
+  await showPendingDeposits(ctx);
+});
+
+bot.action('admin_pending_deposits', async (ctx) => {
+  await ctx.answerCbQuery();
+  await showPendingDeposits(ctx);
+});
+
+async function showPendingDeposits(ctx: any) {
+  const user = ctx.from;
+  
+  // Check if user is admin
+  if (!isAdmin(user.id.toString())) {
+    await ctx.reply('❌ You are not authorized.');
+    return;
+  }
+  
+  try {
+    const deposits = await db.query(
+      `SELECT d.*, u.username, u.first_name, u.telegram_id 
+       FROM deposits d 
+       JOIN users u ON d.user_id = u.id 
+       WHERE d.status = 'pending' 
+       ORDER BY d.created_at DESC 
+       LIMIT 10`,
+      []
+    ) as any[];
+    
+    if (!deposits || deposits.length === 0) {
+      await ctx.reply('✅ No pending deposits.');
+      return;
+    }
+    
+    let message = '⏳ **Pending Deposits**\n\n';
+    
+    deposits.forEach((dep, index) => {
+      message += `${index + 1}. **${dep.amount} Birr** (${dep.method})\n`;
+      message += `   User: ${dep.first_name} (@${dep.username || 'N/A'})\n`;
+      message += `   Ref: \`${dep.transaction_ref}\`\n`;
+      message += `   Date: ${new Date(dep.created_at).toLocaleString()}\n`;
+      message += `   Approve: /approve_deposit ${dep.transaction_ref}\n`;
+      message += `   Reject: /reject_deposit ${dep.transaction_ref}\n\n`;
+    });
+    
+    // Split message if too long
+    if (message.length > 4000) {
+      // Send first part
+      await ctx.reply(message.substring(0, 4000), { parse_mode: 'Markdown' });
+      
+      // Send remaining parts
+      let remaining = message.substring(4000);
+      while (remaining.length > 0) {
+        await ctx.reply(remaining.substring(0, 4000), { parse_mode: 'Markdown' });
+        remaining = remaining.substring(4000);
+      }
+    } else {
+      await ctx.reply(message, { parse_mode: 'Markdown' });
+    }
+  } catch (error) {
+    console.error('Pending deposits error:', error);
+    await ctx.reply('❌ Error fetching pending deposits.');
+  }
+}
+
+// Pending withdrawals command
+bot.command('pending_withdrawals', async (ctx) => {
+  await showPendingWithdrawals(ctx);
+});
+
+bot.action('admin_pending_withdrawals', async (ctx) => {
+  await ctx.answerCbQuery();
+  await showPendingWithdrawals(ctx);
+});
+
+async function showPendingWithdrawals(ctx: any) {
+  const user = ctx.from;
+  
+  // Check if user is admin
+  if (!isAdmin(user.id.toString())) {
+    await ctx.reply('❌ You are not authorized.');
+    return;
+  }
+  
+  try {
+    const withdrawals = await db.query(
+      `SELECT w.*, u.username, u.first_name, u.telegram_id, u.balance 
+       FROM withdrawals w 
+       JOIN users u ON w.user_id = u.id 
+       WHERE w.status = 'pending' 
+       ORDER BY w.created_at DESC 
+       LIMIT 10`,
+      []
+    ) as any[];
+    
+    if (!withdrawals || withdrawals.length === 0) {
+      await ctx.reply('✅ No pending withdrawals.');
+      return;
+    }
+    
+    let message = '⏳ **Pending Withdrawals**\n\n';
+    
+    withdrawals.forEach((wd, index) => {
+      message += `${index + 1}. **${wd.amount} Birr**\n`;
+      message += `   User: ${wd.first_name} (@${wd.username || 'N/A'})\n`;
+      message += `   Account: \`${wd.account_number}\`\n`;
+      message += `   Balance: ${wd.balance} Birr\n`;
+      message += `   Date: ${new Date(wd.created_at).toLocaleString()}\n`;
+      message += `   Approve: /approve_withdrawal ${wd.id}\n`;
+      message += `   Reject: /reject_withdrawal ${wd.id}\n\n`;
+    });
+    
+    // Split message if too long
+    if (message.length > 4000) {
+      await ctx.reply(message.substring(0, 4000), { parse_mode: 'Markdown' });
+      let remaining = message.substring(4000);
+      while (remaining.length > 0) {
+        await ctx.reply(remaining.substring(0, 4000), { parse_mode: 'Markdown' });
+        remaining = remaining.substring(4000);
+      }
+    } else {
+      await ctx.reply(message, { parse_mode: 'Markdown' });
+    }
+  } catch (error) {
+    console.error('Pending withdrawals error:', error);
+    await ctx.reply('❌ Error fetching pending withdrawals.');
+  }
+}
+
+// ==================== USER COMMANDS ====================
 
 // Withdraw command execution
 async function executeWithdrawCommand(ctx: any) {
@@ -1213,16 +1776,20 @@ bot.on('text', async (ctx) => {
       }
       
       // Create withdrawal record in database
-      await db.query(
+      const insertResult = await db.query(
         'INSERT INTO withdrawals (user_id, amount, account_number, status, created_at) VALUES (?, ?, ?, "pending", NOW())',
         [users[0].id, amount, accountNumber]
       );
+      
+      // Get the inserted withdrawal ID
+      const withdrawalId = insertResult.insertId;
       
       await ctx.reply(
         `✅ **Withdrawal Request Submitted!**\n\n` +
         `💰 **Amount:** *${amount} Birr*\n` +
         `📱 **Account:** \`${accountNumber}\`\n` +
-        `⏱️ **Status:** Pending Approval\n\n` +
+        `⏱️ **Status:** Pending Approval\n` +
+        `🆔 **Request ID:** \`${withdrawalId}\`\n\n` +
         `You'll be notified once approved.`,
         {
           parse_mode: 'Markdown',
@@ -1247,8 +1814,11 @@ bot.on('text', async (ctx) => {
             `🔔 **New Withdrawal Request**\n\n` +
             `👤 User: ${ctx.from.username || ctx.from.first_name} (${users[0].id})\n` +
             `💰 Amount: ${amount} Birr\n` +
-            `📱 Account: ${accountNumber}\n` +
-            `🕐 Time: ${new Date().toLocaleString()}`,
+            `📱 Account: \`${accountNumber}\`\n` +
+            `🆔 Request ID: \`${withdrawalId}\`\n` +
+            `🕐 Time: ${new Date().toLocaleString()}\n\n` +
+            `To approve: /approve_withdrawal ${withdrawalId}\n` +
+            `To reject: /reject_withdrawal ${withdrawalId}`,
             { parse_mode: 'Markdown' }
           );
         } catch (e) {
@@ -1662,10 +2232,16 @@ async function executeProfileCommand(ctx: any) {
       [userData.id]
     ) as any[];
     
-    const gameStats = await db.query(
-      'SELECT COUNT(*) as games_played, COALESCE(SUM(win_amount), 0) as total_wins FROM game_history WHERE user_id = ?',
-      [userData.id]
-    ) as any[];
+    // Check if game_history table exists, if not, return 0
+    let gameStats = [{ games_played: 0, total_wins: 0 }];
+    try {
+      gameStats = await db.query(
+        'SELECT COUNT(*) as games_played, COALESCE(SUM(win_amount), 0) as total_wins FROM game_history WHERE user_id = ?',
+        [userData.id]
+      ) as any[];
+    } catch (e) {
+      console.log('Game history table may not exist yet');
+    }
     
     await ctx.reply(
       `👤 **Your Profile**\n\n` +
@@ -1736,6 +2312,7 @@ export async function startBot() {
     console.log('🤖 Starting Habesha Bingo Bot...');
     console.log('📝 Environment:', process.env.NODE_ENV);
     console.log('📝 WebApp URL:', process.env.NEXT_PUBLIC_WEBAPP_URL);
+    console.log('👑 Admin IDs:', ADMIN_IDS);
     
     // Only try ngrok in development
     if (process.env.NODE_ENV === 'development') {
