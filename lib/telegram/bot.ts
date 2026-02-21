@@ -71,20 +71,20 @@ function isAdmin(telegramId: string): boolean {
 
 // Set bot commands
 const commands = [
-  { command: 'start', description: '🏠 Start the bot' },
-  { command: 'register', description: '📝 Create new account' },
-  { command: 'play', description: '🎮 Play bingo game' },
-  { command: 'deposit', description: '💰 Add funds to wallet' },
-  { command: 'balance', description: '💳 Check your balance' },
-  { command: 'withdraw', description: '🏧 Withdraw your winnings' },
-  { command: 'invite', description: '👥 Refer friends & earn' },
-  { command: 'instructions', description: '📖 How to play' },
-  { command: 'support', description: '📞 Contact support' },
-  { command: 'about', description: 'ℹ️ About Habesha Bingo' },
-  { command: 'history', description: '📜 Transaction history' },
-  { command: 'profile', description: '👤 View your profile' },
+  { command: 'start', description: 'Start' },
+  { command: 'register', description: 'register' },
+  { command: 'play', description: ' Play bingo' },
+  { command: 'deposit', description: ' Deposit' },
+  { command: 'balance', description: 'balance' },
+  { command: 'withdraw', description: 'Withdraw' },
+  { command: 'invite', description: 'Invite ' },
+  { command: 'instructions', description: 'How to play' },
+  { command: 'support', description: 'support' },
+  { command: 'about', description: ' About ' },
+  { command: 'history', description: 'Transaction ' },
+  { command: 'profile', description: 'profile' },
   { command: 'cancel', description: '❌ Cancel current operation' },
-  { command: 'menu', description: '📋 Show main menu' },
+  { command: 'menu', description: 'main menu' },
 ]
 
 // Admin commands (only visible to admins)
@@ -536,7 +536,7 @@ async function executeBalanceCommand(ctx: any) {
     
     await ctx.reply(
       `💰 **Your Wallet**\n\n` +
-      `💳 **Main Balance:** *${userData.balance} Birr*\n` +
+      `💳 **Main Balance:** *${userData.balance + approvedDeposits[0]?.total} Birr*\n` +
       `🎁 **Bonus Balance:** *${userData.bonus_balance} Birr*\n` +
       `🎯 **Total Balance:** *${userData.balance + userData.bonus_balance} Birr*\n\n` +
       `⏳ **Pending Deposits:** *${pendingDepositTotal} Birr*\n` +
@@ -837,105 +837,105 @@ bot.on('text', async (ctx) => {
 });
 
 // Handle screenshot upload option
-bot.action('deposit_upload_screenshot', async (ctx) => {
-  await ctx.answerCbQuery();
+// bot.action('deposit_upload_screenshot', async (ctx) => {
+//   await ctx.answerCbQuery();
   
-  updateSession(ctx, {
-    depositStep: 'waiting_screenshot'
-  });
+//   updateSession(ctx, {
+//     depositStep: 'waiting_screenshot'
+//   });
   
-  await ctx.reply(
-    '📸 **Upload Screenshot (Optional)**\n\n' +
-    'Send the payment screenshot now.\n\n' +
-    '⚠️ **If upload fails, your deposit will still be saved!**\n\n' +
-    '👉 To skip screenshot, type /skip',
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        force_reply: true
-      }
-    }
-  );
+//   await ctx.reply(
+//     '📸 **Upload Screenshot (Optional)**\n\n' +
+//     'Send the payment screenshot now.\n\n' +
+//     '⚠️ **If upload fails, your deposit will still be saved!**\n\n' +
+//     '👉 To skip screenshot, type /skip',
+//     {
+//       parse_mode: 'Markdown',
+//       reply_markup: {
+//         force_reply: true
+//       }
+//     }
+//   );
   
-  // Set a timeout to auto-submit after 2 minutes
-  setTimeout(async () => {
-    const currentSession = sessionStore.get(getSessionKey(ctx));
-    if (currentSession?.depositStep === 'waiting_screenshot' && 
-        currentSession?.depositAmount && 
-        currentSession?.transactionRef) {
-      await submitDeposit(ctx, null, '⏱️ Auto-submitted (timeout)');
-    }
-  }, 120000); // 2 minutes
-});
+//   // Set a timeout to auto-submit after 2 minutes
+//   setTimeout(async () => {
+//     const currentSession = sessionStore.get(getSessionKey(ctx));
+//     if (currentSession?.depositStep === 'waiting_screenshot' && 
+//         currentSession?.depositAmount && 
+//         currentSession?.transactionRef) {
+//       await submitDeposit(ctx, null, '⏱️ Auto-submitted (timeout)');
+//     }
+//   }, 120000); // 2 minutes
+// });
 
 // Handle skip command
-bot.command('skip', async (ctx) => {
-  const session = getSession(ctx);
+// bot.command('skip', async (ctx) => {
+//   const session = getSession(ctx);
   
-  // Check if we're in deposit flow
-  if (session?.depositAmount && session?.transactionRef) {
-    await submitDeposit(ctx, null, '⏭️ Skipped screenshot');
-  } else {
-    await ctx.reply('No pending deposit to skip.');
-  }
-});
+//   // Check if we're in deposit flow
+//   if (session?.depositAmount && session?.transactionRef) {
+//     await submitDeposit(ctx, null, '⏭️ Skipped screenshot');
+//   } else {
+//     await ctx.reply('No pending deposit to skip.');
+//   }
+// });
 
 // Submit without screenshot
-bot.action('deposit_submit_without_screenshot', async (ctx) => {
-  await ctx.answerCbQuery();
-  await submitDeposit(ctx, null, '✅ Submitted with reference only');
-});
+// bot.action('deposit_submit_without_screenshot', async (ctx) => {
+//   await ctx.answerCbQuery();
+//   await submitDeposit(ctx, null, '✅ Submitted with reference only');
+// });
 
 // Handle photo upload (screenshot)
-bot.on('photo', async (ctx) => {
-  console.log('📸 Photo received from user:', ctx.from.id);
-  const session = getSession(ctx);
+// bot.on('photo', async (ctx) => {
+//   console.log('📸 Photo received from user:', ctx.from.id);
+//   const session = getSession(ctx);
   
-  // Check if we're in deposit flow
-  if (!session?.depositAmount || !session?.transactionRef) {
-    await ctx.reply(
-      '⚠️ No pending deposit found.\n\n' +
-      'Please start a deposit first with /deposit',
-      Markup.inlineKeyboard([
-        [{ text: '📤 Start Deposit', callback_data: 'start_deposit' }]
-      ])
-    );
-    return;
-  }
+//   // Check if we're in deposit flow
+//   if (!session?.depositAmount || !session?.transactionRef) {
+//     await ctx.reply(
+//       '⚠️ No pending deposit found.\n\n' +
+//       'Please start a deposit first with /deposit',
+//       Markup.inlineKeyboard([
+//         [{ text: '📤 Start Deposit', callback_data: 'start_deposit' }]
+//       ])
+//     );
+//     return;
+//   }
   
-  // Send typing indicator
-  await ctx.sendChatAction('typing');
+//   // Send typing indicator
+//   await ctx.sendChatAction('typing');
   
-  try {
-    // Get the largest photo (best quality)
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const fileId = photo.file_id;
+//   try {
+//     // Get the largest photo (best quality)
+//     const photo = ctx.message.photo[ctx.message.photo.length - 1];
+//     const fileId = photo.file_id;
     
-    console.log('📸 Processing photo, file_id:', fileId);
+//     console.log('📸 Processing photo, file_id:', fileId);
     
-    // Get file URL from Telegram
-    const fileLink = await ctx.telegram.getFileLink(fileId);
-    const screenshotUrl = fileLink.href;
+//     // Get file URL from Telegram
+//     const fileLink = await ctx.telegram.getFileLink(fileId);
+//     const screenshotUrl = fileLink.href;
     
-    console.log('📸 Got file link:', screenshotUrl);
+//     console.log('📸 Got file link:', screenshotUrl);
     
-    // Submit deposit with screenshot
-    await submitDeposit(ctx, screenshotUrl, '📸 With screenshot');
+//     // Submit deposit with screenshot
+//     await submitDeposit(ctx, screenshotUrl, '📸 With screenshot');
     
-  } catch (error) {
-    console.error('❌ Screenshot upload error:', error);
+//   } catch (error) {
+//     console.error('❌ Screenshot upload error:', error);
     
-    // Even if screenshot fails, still submit with reference only
-    await ctx.reply(
-      '⚠️ **Screenshot upload failed**\n\n' +
-      `Error: ${error.message || 'Unknown error'}\n\n` +
-      'But don\'t worry! Your deposit will still be processed using the transaction reference.',
-      { parse_mode: 'Markdown' }
-    );
+//     // Even if screenshot fails, still submit with reference only
+//     await ctx.reply(
+//       '⚠️ **Screenshot upload failed**\n\n' +
+//       `Error: ${error.message || 'Unknown error'}\n\n` +
+//       'But don\'t worry! Your deposit will still be processed using the transaction reference.',
+//       { parse_mode: 'Markdown' }
+//     );
     
-    await submitDeposit(ctx, null, '⚠️ Screenshot failed - using ref only');
-  }
-});
+//     await submitDeposit(ctx, null, '⚠️ Screenshot failed - using ref only');
+//   }
+// });
 
 // Helper function to submit deposit
 async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote: string = '') {
@@ -1748,7 +1748,9 @@ async function showPendingWithdrawals(ctx: any) {
 
 // ==================== USER COMMANDS ====================
 
-// Withdraw command execution
+
+
+// Withdraw command execution - FIXED VERSION
 async function executeWithdrawCommand(ctx: any) {
   try {
     const user = ctx.from;
@@ -1769,7 +1771,8 @@ async function executeWithdrawCommand(ctx: any) {
     // Get user balance
     const userData = await getUserData(user.id.toString());
     
-    await ctx.reply(
+    // Send the withdrawal prompt with a unique identifier
+    const sentMessage = await ctx.reply(
       `🏧 **Withdraw Funds**\n\n` +
       `💰 **Available Balance:** *${userData.balance} Birr*\n` +
       `📝 **Minimum Withdrawal:** 10 Birr\n` +
@@ -1778,7 +1781,8 @@ async function executeWithdrawCommand(ctx: any) {
       `\`\`\`\nAmount\nAccount Number\n\`\`\`\n\n` +
       `**Example:**\n` +
       `\`\`\`\n50\n0911-123-4567\n\`\`\`\n\n` +
-      `⚠️ Make sure you have sufficient balance!`,
+      `⚠️ Make sure you have sufficient balance!\n\n` +
+      `_Reply to this message with your withdrawal details._`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
@@ -1787,6 +1791,14 @@ async function executeWithdrawCommand(ctx: any) {
         }
       }
     );
+    
+    // Store the message ID in session to track withdrawal flow
+    updateSession(ctx, {
+      withdrawStep: 'awaiting_details',
+      withdrawMessageId: sentMessage.message_id,
+      timestamp: Date.now()
+    });
+    
   } catch (error) {
     console.error('Withdraw command error:', error);
     await ctx.reply(
@@ -1798,6 +1810,290 @@ async function executeWithdrawCommand(ctx: any) {
     );
   }
 }
+
+// Withdraw command
+bot.command('withdraw', async (ctx) => {
+  await executeWithdrawCommand(ctx);
+});
+
+// Handle withdrawal text - FIXED VERSION
+bot.on('text', async (ctx) => {
+  const text = ctx.message.text;
+  const session = getSession(ctx);
+  
+  // Log for debugging
+  console.log('📝 Text received:', text);
+  console.log('📝 Reply to message:', ctx.message.reply_to_message?.message_id);
+  console.log('📝 Session state:', session);
+  
+  // Check if this is a reply to the withdrawal prompt
+  const isWithdrawalReply = ctx.message.reply_to_message && 
+                           (ctx.message.reply_to_message.text?.includes('Withdraw Funds') || 
+                            ctx.message.reply_to_message.text?.includes('withdrawal details'));
+  
+  // Also check if we're in withdrawal flow based on session
+  const isInWithdrawalFlow = session?.withdrawStep === 'awaiting_details';
+  
+  if (isWithdrawalReply || isInWithdrawalFlow) {
+    console.log('✅ Processing withdrawal request');
+    
+    // Split by newlines and filter empty lines
+    const lines = text.split('\n').filter(line => line.trim() !== '');
+    
+    if (lines.length < 2) {
+      await ctx.reply(
+        '❌ **Invalid format**\n\n' +
+        'Please send your withdrawal details in this format:\n' +
+        '`Amount\nAccountNumber`\n\n' +
+        '**Example:**\n' +
+        '`50\n0911-123-4567`\n\n' +
+        'Please try again with /withdraw',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'menu_withdraw' }]
+            ]
+          }
+        }
+      );
+      // Clear session
+      clearSession(ctx);
+      return;
+    }
+    
+    const amount = parseFloat(lines[0].trim());
+    const accountNumber = lines[1].trim();
+    
+    // Validate amount
+    if (isNaN(amount) || amount < 10) {
+      await ctx.reply(
+        '❌ **Invalid amount**\n\n' +
+        'Minimum withdrawal is 10 Birr.\n\n' +
+        'Please try again with /withdraw',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'menu_withdraw' }]
+            ]
+          }
+        }
+      );
+      // Clear session
+      clearSession(ctx);
+      return;
+    }
+    
+    // Validate account number
+    if (!accountNumber || accountNumber.length < 5) {
+      await ctx.reply(
+        '❌ **Invalid account number**\n\n' +
+        'Please enter a valid account number (at least 5 digits).\n\n' +
+        'Please try again with /withdraw',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'menu_withdraw' }]
+            ]
+          }
+        }
+      );
+      // Clear session
+      clearSession(ctx);
+      return;
+    }
+    
+    // Send typing indicator
+    await ctx.sendChatAction('typing');
+    
+    // Check if user has sufficient balance
+    try {
+      const users = await db.query(
+        'SELECT id, balance, username, first_name FROM users WHERE telegram_id = ?',
+        [ctx.from.id.toString()]
+      ) as any[];
+      
+      if (!users || users.length === 0) {
+        await ctx.reply(
+          '❌ You are not registered. Use /register first.',
+          Markup.inlineKeyboard([
+            [Markup.button.callback('📝 Register Now', 'menu_register')]
+          ])
+        );
+        // Clear session
+        clearSession(ctx);
+        return;
+      }
+      
+      const user = users[0];
+      
+      if (user.balance < amount) {
+        await ctx.reply(
+          '❌ **Insufficient balance**\n\n' +
+          `Your balance: *${user.balance} Birr*\n` +
+          `Requested: *${amount} Birr*\n\n` +
+          `Please deposit more funds to continue.`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💰 Check Balance', callback_data: 'menu_balance' }],
+                [{ text: '💰 Deposit', callback_data: 'menu_deposit' }],
+                [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+              ]
+            }
+          }
+        );
+        // Clear session
+        clearSession(ctx);
+        return;
+      }
+      
+      // Create withdrawal record in database
+      console.log('💾 Creating withdrawal record:', { userId: user.id, amount, accountNumber });
+      
+      const insertResult = await db.query(
+        'INSERT INTO withdrawals (user_id, amount, account_number, status, created_at) VALUES (?, ?, ?, "pending", NOW())',
+        [user.id, amount, accountNumber]
+      );
+      
+      // Get the inserted withdrawal ID
+      const withdrawalId = insertResult.insertId;
+      
+      console.log('✅ Withdrawal created with ID:', withdrawalId);
+      
+      // Clear session after successful submission
+      clearSession(ctx);
+      
+      await ctx.reply(
+        `✅ **Withdrawal Request Submitted!**\n\n` +
+        `💰 **Amount:** *${amount} Birr*\n` +
+        `📱 **Account:** \`${accountNumber}\`\n` +
+        `⏱️ **Status:** Pending Approval\n` +
+        `🆔 **Request ID:** \`${withdrawalId}\`\n\n` +
+        `**What happens next?**\n` +
+        `1️⃣ Admin will review your request\n` +
+        `2️⃣ If approved, amount will be sent to your account\n` +
+        `3️⃣ You'll be notified within 1-24 hours`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '💳 Check Balance', callback_data: 'menu_balance' }],
+              [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+            ]
+          }
+        }
+      );
+      
+      // Notify admins
+      const admins = await db.query(
+        'SELECT telegram_id FROM users WHERE role IN ("admin", "superadmin") AND telegram_id IS NOT NULL'
+      ) as any[];
+      
+      console.log(`👥 Notifying ${admins.length} admins`);
+      
+      for (const admin of admins) {
+        try {
+          await ctx.telegram.sendMessage(
+            admin.telegram_id,
+            `🔔 **New Withdrawal Request**\n\n` +
+            `👤 **User:** ${user.first_name || 'Unknown'} (@${user.username || 'N/A'})\n` +
+            `🆔 **User ID:** \`${user.id}\`\n` +
+            `💰 **Amount:** *${amount} Birr*\n` +
+            `📱 **Account:** \`${accountNumber}\`\n` +
+            `🆔 **Request ID:** \`${withdrawalId}\`\n` +
+            `🕐 **Time:** ${new Date().toLocaleString()}\n\n` +
+            `**Actions:**\n` +
+            `✅ Approve: /approve_withdrawal ${withdrawalId}\n` +
+            `❌ Reject: /reject_withdrawal ${withdrawalId}`,
+            { parse_mode: 'Markdown' }
+          );
+          console.log(`✅ Notified admin: ${admin.telegram_id}`);
+        } catch (e) {
+          console.error(`❌ Failed to notify admin ${admin.telegram_id}:`, e);
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ Withdrawal error:', error);
+      await ctx.reply(
+        '❌ **Failed to process withdrawal**\n\n' +
+        `Error: ${error.message || 'Unknown error'}\n\n` +
+        'Please try again or contact support.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Try Again', 'menu_withdraw')],
+          [Markup.button.callback('📞 Contact Support', 'menu_support')]
+        ])
+      );
+      // Clear session on error
+      clearSession(ctx);
+    }
+  }
+});
+
+
+
+bot.on('text', async (ctx) => {
+  const session = getSession(ctx);
+  
+  // If we're in withdrawal flow but this message is not a reply, remind them
+  if (session?.withdrawStep === 'awaiting_details' && !ctx.message.reply_to_message) {
+    await ctx.reply(
+      '⚠️ **Withdrawal in Progress**\n\n' +
+      'Please reply to the withdrawal message with your details.\n\n' +
+      'Format:\n' +
+      '`Amount\nAccountNumber`\n\n' +
+      'Example:\n' +
+      '`50\n0911-123-4567`\n\n' +
+      'Or type /cancel to cancel.',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '❌ Cancel', callback_data: 'cancel_withdrawal' }]
+          ]
+        }
+      }
+    );
+  }
+});
+
+// Cancel withdrawal
+bot.action('cancel_withdrawal', async (ctx) => {
+  await ctx.answerCbQuery();
+  clearSession(ctx);
+  await ctx.reply(
+    '❌ Withdrawal cancelled.',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('📋 Main Menu', 'show_menu')]
+    ])
+  );
+});
+
+// Also handle /cancel command for withdrawal
+bot.command('cancel', async (ctx) => {
+  const session = getSession(ctx);
+  if (session?.withdrawStep === 'awaiting_details') {
+    clearSession(ctx);
+    await ctx.reply(
+      '❌ Withdrawal cancelled.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
+  } else {
+    clearSession(ctx);
+    await ctx.reply(
+      '✅ Current operation cancelled.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
+  }
+});
 
 // Withdraw command
 bot.command('withdraw', async (ctx) => {
@@ -1952,13 +2248,18 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// Invite command execution
+
+
+// Invite command execution - FIXED VERSION
 async function executeInviteCommand(ctx: any) {
   try {
     const user = ctx.from;
+    const telegramId = user.id.toString();
+    
+    console.log(`👥 User ${telegramId} requested referral info`);
     
     // Check if user is registered
-    const isRegistered = await checkUserRegistered(user.id.toString());
+    const isRegistered = await checkUserRegistered(telegramId);
     
     if (!isRegistered) {
       await ctx.reply(
@@ -1970,60 +2271,224 @@ async function executeInviteCommand(ctx: any) {
       return;
     }
     
-    // Get user's referral code from database
+    // Get user's data from database
     const users = await db.query(
-      'SELECT id, referral_code FROM users WHERE telegram_id = ?',
-      [user.id.toString()]
+      'SELECT id, referral_code, balance, bonus_balance FROM users WHERE telegram_id = ?',
+      [telegramId]
     ) as any[];
     
     if (!users || users.length === 0) {
-      await ctx.reply('❌ Error fetching referral info. Please try again.');
+      console.error('User not found in database despite being registered:', telegramId);
+      await ctx.reply(
+        '❌ Error fetching your information. Please try again or contact support.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📞 Contact Support', 'menu_support')]
+        ])
+      );
       return;
     }
     
-    const referralCode = users[0].referral_code;
-    const userId = users[0].id;
-    const referralLink = `https://t.me/${ctx.botInfo.username}?start=${referralCode}`;
+    const userData = users[0];
+    const referralCode = userData.referral_code;
+    const userId = userData.id;
     
-    // Get referral count and earnings
-    const referrals = await db.query(
-      'SELECT COUNT(*) as count, COALESCE(SUM(bonus_balance), 0) as total FROM users WHERE referred_by = ?',
+    // Create referral link
+    const botUsername = ctx.botInfo?.username || 'HabeshaBingoBot';
+    const referralLink = `https://t.me/${botUsername}?start=${referralCode}`;
+    
+    // Get referral count - FIXED: Using correct column name (referred_by)
+    const referralsResult = await db.query(
+      'SELECT COUNT(*) as count FROM users WHERE referred_by = ?',
       [userId]
     ) as any[];
     
-    const referralCount = referrals[0]?.count || 0;
-    const referralEarnings = referralCount * 10; // 10 Birr per referral
+    const referralCount = referralsResult[0]?.count || 0;
+    
+    // Calculate referral earnings (10 Birr per referral)
+    const referralEarnings = referralCount * 10;
+    
+    // Get list of recent referrals (optional, for display)
+    const recentReferrals = await db.query(
+      'SELECT first_name, username, created_at FROM users WHERE referred_by = ? ORDER BY created_at DESC LIMIT 5',
+      [userId]
+    ) as any[];
+    
+    console.log(`📊 User ${telegramId} has ${referralCount} referrals, earned ${referralEarnings} Birr`);
+    
+    // Build the message
+    let message = `👥 **Refer & Earn**\n\n`;
+    message += `🎁 Earn **10 Birr** for each friend who joins using your link!\n\n`;
+    message += `🔑 **Your Referral Code:** \`${referralCode}\`\n`;
+    message += `📊 **Total Referrals:** *${referralCount}*\n`;
+    message += `💰 **Total Earned:** *${referralEarnings} Birr*\n\n`;
+    message += `📱 **Your Referral Link:**\n`;
+    message += `${referralLink}\n\n`;
+    
+    // Add recent referrals if any
+    if (recentReferrals && recentReferrals.length > 0) {
+      message += `**Recent Referrals:**\n`;
+      recentReferrals.forEach((ref: any, index: number) => {
+        const name = ref.first_name || ref.username || 'Anonymous';
+        const date = new Date(ref.created_at).toLocaleDateString();
+        message += `${index + 1}. ${name} - ${date}\n`;
+      });
+      message += `\n`;
+    }
+    
+    message += `**How it works:**\n`;
+    message += `1️⃣ Share your link with friends\n`;
+    message += `2️⃣ They register using your code\n`;
+    message += `3️⃣ You get 10 Birr bonus instantly!\n`;
+    message += `4️⃣ They get 50 Birr welcome bonus 🎉`;
     
     await ctx.reply(
-      `👥 **Refer & Earn**\n\n` +
-      `🎁 Earn **10 Birr** for each friend who joins!\n\n` +
-      `🔑 **Your Referral Code:** \`${referralCode}\`\n` +
-      `📊 **Total Referrals:** *${referralCount}*\n` +
-      `💰 **Total Earned:** *${referralEarnings} Birr*\n\n` +
-      `📱 **Share this link:**\n` +
-      `${referralLink}`,
+      message,
       {
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '📱 Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}` }],
-            [{ text: '📊 View Referrals', callback_data: 'view_referrals' }],
+            [
+              { text: '📱 Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('🎮 Join Habesha Bingo and get 50 Birr welcome bonus! Use my referral code: ' + referralCode)}` }
+            ],
+            [
+              { text: '📊 View All Referrals', callback_data: 'view_referrals' },
+              { text: '🎮 Play Now', callback_data: 'menu_play' }
+            ],
+            [
+              { text: '📋 Main Menu', callback_data: 'show_menu' }
+            ]
+          ]
+        }
+      }
+    );
+    
+  } catch (error) {
+    console.error('❌ Invite command error:', error);
+    await ctx.reply(
+      '❌ **Error fetching referral information**\n\n' +
+      'Please try again or contact support.',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'menu_invite' }],
+            [{ text: '📞 Contact Support', callback_data: 'menu_support' }],
             [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
           ]
         }
       }
     );
+  }
+}
+
+// View referrals callback - FIXED VERSION
+bot.action('view_referrals', async (ctx) => {
+  await ctx.answerCbQuery();
+  
+  try {
+    const user = ctx.from;
+    const telegramId = user.id.toString();
+    
+    console.log(`📊 User ${telegramId} requested to view all referrals`);
+    
+    // Get user ID from database
+    const users = await db.query(
+      'SELECT id FROM users WHERE telegram_id = ?',
+      [telegramId]
+    ) as any[];
+    
+    if (!users || users.length === 0) {
+      await ctx.reply(
+        '❌ You are not registered.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📝 Register Now', 'menu_register')]
+        ])
+      );
+      return;
+    }
+    
+    const userId = users[0].id;
+    
+    // Get all referrals
+    const referrals = await db.query(
+      'SELECT first_name, username, created_at, balance FROM users WHERE referred_by = ? ORDER BY created_at DESC',
+      [userId]
+    ) as any[];
+    
+    if (!referrals || referrals.length === 0) {
+      await ctx.reply(
+        '📊 **You haven\'t referred anyone yet.**\n\n' +
+        'Share your referral link to start earning 10 Birr per friend!',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '👥 Get Referral Link', callback_data: 'menu_invite' }],
+              [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+            ]
+          }
+        }
+      );
+      return;
+    }
+    
+    // Calculate total earnings
+    const totalEarnings = referrals.length * 10;
+    
+    let referralList = `📊 **Your Referrals (${referrals.length} total)**\n\n`;
+    referralList += `💰 **Total Earned:** *${totalEarnings} Birr*\n\n`;
+    
+    if (referrals.length > 10) {
+      referralList += `*Showing last 10 referrals:*\n\n`;
+    }
+    
+    // Show last 10 referrals
+    const displayReferrals = referrals.slice(0, 10);
+    displayReferrals.forEach((ref: any, index: number) => {
+      const name = ref.first_name || ref.username || 'Anonymous';
+      const date = new Date(ref.created_at).toLocaleDateString();
+      referralList += `${index + 1}. ${name} - ${date}\n`;
+    });
+    
+    if (referrals.length > 10) {
+      referralList += `\n*... and ${referrals.length - 10} more*`;
+    }
+    
+    await ctx.editMessageText(
+      referralList,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '👥 Back to Referral', callback_data: 'menu_invite' }],
+            [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
+          ]
+        }
+      }
+    );
+    
   } catch (error) {
-    console.error('Invite error:', error);
+    console.error('❌ View referrals error:', error);
     await ctx.reply(
-      '❌ Error fetching referral info. Please try again.',
+      '❌ Error fetching referrals. Please try again.',
       Markup.inlineKeyboard([
-        [Markup.button.callback('🔄 Try Again', 'menu_invite')],
+        [Markup.button.callback('🔄 Try Again', 'view_referrals')],
         [Markup.button.callback('📋 Main Menu', 'show_menu')]
       ])
     );
   }
-}
+});
+
+// Invite command
+bot.command('invite', async (ctx) => {
+  await executeInviteCommand(ctx);
+});
+
+// Also handle menu_invite callback
+bot.action('menu_invite', async (ctx) => {
+  await ctx.answerCbQuery();
+  await executeInviteCommand(ctx);
+});
 
 // Invite command
 bot.command('invite', async (ctx) => {
