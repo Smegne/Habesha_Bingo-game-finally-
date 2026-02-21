@@ -1,4 +1,4 @@
-// components/game/bingo-game.tsx - COMPLETE UPDATED VERSION WITH CARTELA RELEASE
+// components/game/bingo-game.tsx - COMPLETE UPDATED VERSION WITH MOBILE FIXES AND AMHARIC VOICE
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
@@ -146,7 +146,7 @@ const isSpeechSynthesisSupported = (): boolean => {
   }
 };
 
-// Custom hook for safe speech synthesis
+// Custom hook for safe speech synthesis with mobile fixes
 const useSafeSpeechSynthesis = () => {
   const [isSupported, setIsSupported] = useState(false);
   const [isReady, setIsReady] = useState(false);
@@ -154,11 +154,27 @@ const useSafeSpeechSynthesis = () => {
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [requiresUserInteraction, setRequiresUserInteraction] = useState(false);
+  const [amharicVoices, setAmharicVoices] = useState<SpeechSynthesisVoice[]>([]);
   const userInteractedRef = useRef(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
   
   const handleUserInteraction = useCallback(() => {
     userInteractedRef.current = true;
     setIsReady(true);
+    
+    // Initialize Web Audio API on mobile to unlock audio
+    if (detectEnvironment() === 'mobile' && !audioContextRef.current) {
+      try {
+        // @ts-ignore - Web Audio API
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioContextRef.current = new AudioContextClass();
+        audioContextRef.current.resume().then(() => {
+          console.log('🔊 AudioContext unlocked on mobile');
+        }).catch(console.error);
+      } catch (e) {
+        console.warn('Could not initialize AudioContext:', e);
+      }
+    }
     
     document.removeEventListener('click', handleUserInteraction);
     document.removeEventListener('touchstart', handleUserInteraction);
@@ -166,7 +182,8 @@ const useSafeSpeechSynthesis = () => {
   }, []);
 
   useEffect(() => {
-    if (detectEnvironment() === 'mobile') {
+    const env = detectEnvironment();
+    if (env === 'mobile') {
       console.log('📱 Mobile detected - waiting for user interaction');
       setRequiresUserInteraction(true);
       
@@ -195,10 +212,24 @@ const useSafeSpeechSynthesis = () => {
             const availableVoices = window.speechSynthesis!.getVoices();
             setVoices(availableVoices);
             
-            if (availableVoices.length > 0) {
+            // Find Amharic voices
+            const amharic = availableVoices.filter(v => 
+              v.lang.includes('am') || 
+              v.lang.includes('amh') || 
+              v.lang.includes('et') ||
+              v.name.toLowerCase().includes('amharic') ||
+              v.name.toLowerCase().includes('አማርኛ')
+            );
+            setAmharicVoices(amharic);
+            
+            if (amharic.length > 0) {
+              console.log('🎤 Found Amharic voices:', amharic.map(v => v.name));
+              setSelectedVoice(amharic[0]);
+            } else if (availableVoices.length > 0) {
+              // Fallback to English voice
               let preferredVoice = availableVoices[0];
               
-              if (detectEnvironment() === 'mobile') {
+              if (env === 'mobile') {
                 const mobileVoice = availableVoices.find(v => 
                   v.lang.includes('en') && 
                   (v.name.toLowerCase().includes('compact') || 
@@ -215,8 +246,7 @@ const useSafeSpeechSynthesis = () => {
               }
               
               setSelectedVoice(preferredVoice);
-              console.log('✅ Speech synthesis initialized with', availableVoices.length, 'voices');
-              console.log('🎙️ Selected voice:', preferredVoice.name);
+              console.log('✅ Using English voice:', preferredVoice.name);
             }
           } catch (error) {
             console.error('Error loading voices:', error);
@@ -229,7 +259,11 @@ const useSafeSpeechSynthesis = () => {
           window.speechSynthesis.onvoiceschanged = loadVoices;
         }
         
-        setTimeout(loadVoices, 1000);
+        // Force voice loading on mobile after a delay
+        if (env === 'mobile') {
+          setTimeout(loadVoices, 500);
+          setTimeout(loadVoices, 1000);
+        }
       } else {
         console.warn('⚠️ Speech synthesis not supported in this environment');
       }
@@ -241,6 +275,9 @@ const useSafeSpeechSynthesis = () => {
     
     return () => {
       if (synth) synth.cancel();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
       document.removeEventListener('click', handleUserInteraction);
       document.removeEventListener('touchstart', handleUserInteraction);
       document.removeEventListener('keydown', handleUserInteraction);
@@ -254,7 +291,8 @@ const useSafeSpeechSynthesis = () => {
     userInteractedRef,
     synth, 
     selectedVoice, 
-    voices 
+    voices,
+    amharicVoices
   };
 };
 
@@ -300,6 +338,9 @@ export default function BingoGame() {
   const [environment, setEnvironment] = useState<string>('unknown');
   const [showMobileSoundPrompt, setShowMobileSoundPrompt] = useState(false);
   
+  // Amharic voice setting
+  const [useAmharicVoice, setUseAmharicVoice] = useState(true);
+  
   // Speech synthesis
   const { 
     isSupported: isSpeechSupported, 
@@ -307,7 +348,9 @@ export default function BingoGame() {
     requiresUserInteraction,
     userInteractedRef,
     synth: safeSynth, 
-    selectedVoice: safeSelectedVoice 
+    selectedVoice: safeSelectedVoice,
+    voices,
+    amharicVoices
   } = useSafeSpeechSynthesis();
   
   // Refs
@@ -323,6 +366,101 @@ export default function BingoGame() {
   const autoTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedRef = useRef(false);
   const cartelaReleasedRef = useRef(false);
+
+  // ==================== AMHARIC NUMBER PRONUNCIATION ====================
+
+  const getAmharicNumberWord = (num: number): string => {
+    const amharicNumbers: Record<number, string> = {
+      1: 'አንድ',
+      2: 'ሁለት',
+      3: 'ሶስት',
+      4: 'አራት',
+      5: 'አምስት',
+      6: 'ስድስት',
+      7: 'ሰባት',
+      8: 'ስምንት',
+      9: 'ዘጠኝ',
+      10: 'አስር',
+      11: 'አስራ አንድ',
+      12: 'አስራ ሁለት',
+      13: 'አስራ ሶስት',
+      14: 'አስራ አራት',
+      15: 'አስራ አምስት',
+      16: 'አስራ ስድስት',
+      17: 'አስራ ሰባት',
+      18: 'አስራ ስምንት',
+      19: 'አስራ ዘጠኝ',
+      20: 'ሃያ',
+      21: 'ሃያ አንድ',
+      22: 'ሃያ ሁለት',
+      23: 'ሃያ ሶስት',
+      24: 'ሃያ አራት',
+      25: 'ሃያ አምስት',
+      26: 'ሃያ ስድስት',
+      27: 'ሃያ ሰባት',
+      28: 'ሃያ ስምንት',
+      29: 'ሃያ ዘጠኝ',
+      30: 'ሰላሳ',
+      31: 'ሰላሳ አንድ',
+      32: 'ሰላሳ ሁለት',
+      33: 'ሰላሳ ሶስት',
+      34: 'ሰላሳ አራት',
+      35: 'ሰላሳ አምስት',
+      36: 'ሰላሳ ስድስት',
+      37: 'ሰላሳ ሰባት',
+      38: 'ሰላሳ ስምንት',
+      39: 'ሰላሳ ዘጠኝ',
+      40: 'አርባ',
+      41: 'አርባ አንድ',
+      42: 'አርባ ሁለት',
+      43: 'አርባ ሶስት',
+      44: 'አርባ አራት',
+      45: 'አርባ አምስት',
+      46: 'አርባ ስድስት',
+      47: 'አርባ ሰባት',
+      48: 'አርባ ስምንት',
+      49: 'አርባ ዘጠኝ',
+      50: 'ሃምሳ',
+      51: 'ሃምሳ አንድ',
+      52: 'ሃምሳ ሁለት',
+      53: 'ሃምሳ ሶስት',
+      54: 'ሃምሳ አራት',
+      55: 'ሃምሳ አምስት',
+      56: 'ሃምሳ ስድስት',
+      57: 'ሃምሳ ሰባት',
+      58: 'ሃምሳ ስምንት',
+      59: 'ሃምሳ ዘጠኝ',
+      60: 'ስልሳ',
+      61: 'ስልሳ አንድ',
+      62: 'ስልሳ ሁለት',
+      63: 'ስልሳ ሶስት',
+      64: 'ስልሳ አራት',
+      65: 'ስልሳ አምስት',
+      66: 'ስልሳ ስድስት',
+      67: 'ስልሳ ሰባት',
+      68: 'ስልሳ ስምንት',
+      69: 'ስልሳ ዘጠኝ',
+      70: 'ሰባ',
+      71: 'ሰባ አንድ',
+      72: 'ሰባ ሁለት',
+      73: 'ሰባ ሶስት',
+      74: 'ሰባ አራት',
+      75: 'ሰባ አምስት'
+    };
+    
+    return amharicNumbers[num] || num.toString();
+  };
+
+  const getAmharicLetter = (letter: string): string => {
+    const amharicLetters: Record<string, string> = {
+      'B': 'ቢ',
+      'I': 'አይ',
+      'N': 'ኤን',
+      'G': 'ጂ',
+      'O': 'ኦ'
+    };
+    return amharicLetters[letter] || letter;
+  };
 
   // ==================== CARTELA RELEASE FUNCTION ====================
   const releaseCartelaAfterGame = useCallback(async () => {
@@ -349,7 +487,6 @@ export default function BingoGame() {
     else {
       const storedCardId = localStorage.getItem('currentBingoCardId');
       if (storedCardId) {
-        // You might need to fetch the cartela ID using the bingo card ID
         try {
           const response = await fetch(`/api/game/bingo-card/${storedCardId}`);
           const data = await response.json();
@@ -534,7 +671,7 @@ export default function BingoGame() {
         const serverCalled = data.session.calledNumbers || [];
         setPlayers(data.players || []);
         
-        // Check if game has ended and show winner announcement for ALL non-winning players
+        // Check if game has ended
         if (data.session.isGameFinished || data.session.status === 'finished' || data.session.gameEndedAt) {
           if (!gameEnded) {
             console.log('🏁 Game has ended - showing winner announcement');
@@ -545,14 +682,10 @@ export default function BingoGame() {
             // RELEASE THE CARTELA WHEN GAME ENDS
             await releaseCartelaAfterGame();
             
-            // Show winner announcement for ALL players (including winner, but we'll filter)
             if (data.session.winner) {
-              // Check if current user is NOT the winner
               const isCurrentUserWinner = data.session.winner.userId === gameState?.user?.id;
               
               if (!isCurrentUserWinner) {
-                // This is a non-winning player - show the winner announcement popup
-                console.log('📢 Showing winner announcement for non-winning player:', data.session.winner);
                 setWinnerAnnouncement({
                   winner: {
                     userId: data.session.winner.userId,
@@ -570,17 +703,10 @@ export default function BingoGame() {
                   },
                   message: `🏆 ${data.session.winner.username || 'Someone'} won with ${data.session.winner.winType || 'BINGO'}! 🏆`
                 });
-              } else {
-                // Current user IS the winner - their own win popup will show
-                console.log('👑 Current user is the winner - showing win popup instead');
-                // The winner's popup is already shown via declareWinToServer response
               }
               
-              // Fetch winner history for everyone
               fetchWinnerHistory(data.session.id);
             } else {
-              // No winner data but game ended - show generic message
-              console.log('Game ended but no winner data');
               setWinnerAnnouncement({
                 winner: {
                   userId: '',
@@ -892,7 +1018,10 @@ export default function BingoGame() {
           }
           
           if (!isMuted && isSpeechReady) {
-            speak(`Congratulations! You won with ${winType}!`);
+            const winMessage = useAmharicVoice ? 
+              `እንኳን ደስ አለዎት! በ ${winType} አሸንፈዋል!` :
+              `Congratulations! You won with ${winType}!`;
+            speak(winMessage);
           }
         }
         
@@ -1053,18 +1182,24 @@ export default function BingoGame() {
     return num.toString();
   };
 
-  const speak = (text: string, callback?: () => void) => {
+  const speak = (text: string, callback?: () => void, forceAmharic: boolean = false) => {
+    // On mobile, if user hasn't interacted yet, skip speech
+    if (environment === 'mobile' && !userInteractedRef.current) {
+      console.log('Mobile: Waiting for user interaction before speaking');
+      if (callback) setTimeout(callback, 100);
+      return;
+    }
+    
+    const shouldUseAmharic = (useAmharicVoice || forceAmharic) && amharicVoices.length > 0;
     const canSpeak = isSpeechSupported && 
-                     selectedVoiceRef.current && 
-                     synthRef.current && 
-                     !isSpeakingRef.current && 
                      !isMuted &&
                      isSpeechReady;
     
     if (!canSpeak) {
-      console.log('Speech skipped');
+      console.log('Speech skipped - using fallback sound');
       
-      if (environment === 'mobile' && !isMuted && isSpeechReady) {
+      // Use fallback sound on mobile
+      if (environment === 'mobile' && !isMuted) {
         playMobileFallbackSound();
       }
       
@@ -1075,11 +1210,29 @@ export default function BingoGame() {
     }
     
     try {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.voice = selectedVoiceRef.current;
+      // Cancel any ongoing speech
+      if (synthRef.current) {
+        synthRef.current.cancel();
+      }
       
+      // Create utterance
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Select voice based on language preference
+      if (shouldUseAmharic && amharicVoices.length > 0) {
+        // Use Amharic voice
+        utterance.voice = amharicVoices[0];
+        utterance.lang = 'am-ET';
+        console.log('🗣️ Speaking Amharic:', text);
+      } else {
+        // Use English voice
+        utterance.voice = selectedVoiceRef.current;
+        utterance.lang = 'en-US';
+      }
+      
+      // Adjust for mobile
       if (environment === 'mobile') {
-        utterance.rate = 0.8;
+        utterance.rate = 0.9;  // Slightly slower on mobile
         utterance.pitch = 1.0;
         utterance.volume = volume * 0.9;
       } else {
@@ -1099,6 +1252,7 @@ export default function BingoGame() {
         console.error('Speech synthesis error:', error);
         isSpeakingRef.current = false;
         
+        // Fallback to sound on mobile
         if (environment === 'mobile') {
           playMobileFallbackSound();
         }
@@ -1106,10 +1260,11 @@ export default function BingoGame() {
         if (callback) callback();
       };
       
-      synthRef.current.cancel();
-      
+      // Small delay for mobile
       setTimeout(() => {
-        synthRef.current!.speak(utterance);
+        if (synthRef.current) {
+          synthRef.current.speak(utterance);
+        }
       }, environment === 'mobile' ? 50 : 0);
       
     } catch (error) {
@@ -1140,21 +1295,41 @@ export default function BingoGame() {
 
   const speakBingoNumber = (num: number, callback?: () => void) => {
     const letter = getLetter(num);
-    let numberText: string;
     
-    if (num <= 20 || num % 10 === 0) {
-      numberText = getNumberWord(num);
+    if ((useAmharicVoice || amharicVoices.length > 0) && amharicVoices.length > 0) {
+      // Amharic format
+      const amharicLetter = getAmharicLetter(letter);
+      const amharicNumber = getAmharicNumberWord(num);
+      
+      // Choose format based on voice capability
+      let speakText;
+      if (amharicVoices[0]?.name.toLowerCase().includes('google')) {
+        // Google voices handle numbers better
+        speakText = `${amharicLetter} ${num}`;
+      } else {
+        // Use full Amharic words
+        speakText = `${amharicLetter} ${amharicNumber}`;
+      }
+      
+      speak(speakText, callback, true);
     } else {
-      const tens = Math.floor(num / 10);
-      const ones = num % 10;
-      numberText = `${getNumberWord(tens * 10)} ${getNumberWord(ones)}`;
+      // English format
+      let numberText: string;
+      
+      if (num <= 20 || num % 10 === 0) {
+        numberText = getNumberWord(num);
+      } else {
+        const tens = Math.floor(num / 10);
+        const ones = num % 10;
+        numberText = `${getNumberWord(tens * 10)} ${getNumberWord(ones)}`;
+      }
+      
+      const speakText = environment === 'mobile' 
+        ? `${letter} ${num}`
+        : `${letter} ${numberText}`;
+      
+      speak(speakText, callback);
     }
-    
-    const speakText = environment === 'mobile' 
-      ? `${letter} ${num}`
-      : `${letter} ${numberText}`;
-    
-    speak(speakText, callback);
   };
 
   const callNumber = async (num: number) => {
@@ -1362,7 +1537,9 @@ export default function BingoGame() {
       setIsWinner(true);
       
       const winTypes = wins.map(w => w.type).join(', ');
-      const winMessage = `BINGO! ${winTypes.toUpperCase()}! Congratulations ${gameState?.user?.username || ''}!`;
+      const winMessage = useAmharicVoice ?
+        `ቢንጎ! ${winTypes.toUpperCase()}! እንኳን ደስ አለዎት ${gameState?.user?.username || ''}!` :
+        `BINGO! ${winTypes.toUpperCase()}! Congratulations ${gameState?.user?.username || ''}!`;
       
       setTimeout(() => {
         speak(winMessage);
@@ -1402,7 +1579,8 @@ export default function BingoGame() {
     
     if (!newMutedState && environment === 'mobile' && isSpeechReady) {
       setTimeout(() => {
-        speak("Sound enabled");
+        const testMessage = useAmharicVoice ? 'ድምጽ ተከፍቷል' : 'Sound enabled';
+        speak(testMessage);
       }, 100);
     }
   };
@@ -1418,7 +1596,10 @@ export default function BingoGame() {
       return;
     }
     
-    speak("Testing sound. Bingo number B five");
+    const testMessage = useAmharicVoice ? 
+      'የድምጽ ሙከራ። ቢ አምስት' : 
+      'Testing sound. Bingo number B five';
+    speak(testMessage);
     
     userInteractedRef.current = true;
     setShowMobileSoundPrompt(false);
@@ -1454,7 +1635,10 @@ export default function BingoGame() {
     }
     
     // Show message that cartela is now available
-    alert('✅ Cartela released and is now available for others to use!');
+    const message = useAmharicVoice ? 
+      '✅ ካርቴላ ተለቋል እና ለሌሎች ዝግጁ ነው' :
+      '✅ Cartela released and is now available for others to use!';
+    alert(message);
   };
 
   const handleLeaveGame = async () => {
@@ -1940,7 +2124,7 @@ export default function BingoGame() {
                 WebkitTextFillColor: 'transparent',
                 textShadow: '2px 2px 4px rgba(0,0,0,0.2)'
               }}>
-                BINGO!
+                {useAmharicVoice ? 'ቢንጎ!' : 'BINGO!'}
               </h1>
               
               <div style={{
@@ -1952,7 +2136,7 @@ export default function BingoGame() {
               }}>
                 {gameState?.user?.username ? (
                   <>
-                    CONGRATULATIONS<br />
+                    {useAmharicVoice ? 'እንኳን ደስ አለዎት' : 'CONGRATULATIONS'}<br />
                     <span style={{
                       color: '#000',
                       display: 'block',
@@ -1964,7 +2148,7 @@ export default function BingoGame() {
                     </span>
                   </>
                 ) : (
-                  'CONGRATULATIONS!'
+                  useAmharicVoice ? 'እንኳን ደስ አለዎት!' : 'CONGRATULATIONS!'
                 )}
               </div>
               
@@ -1977,16 +2161,21 @@ export default function BingoGame() {
                   display: 'inline-block'
                 }}>
                   <div style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
-                    {winDetails.message || `You won with ${winDetails.winType || 'BINGO'}!`}
+                    {winDetails.message || 
+                      (useAmharicVoice ? 
+                        `በ ${winDetails.winType || 'ቢንጎ'} አሸንፈዋል!` : 
+                        `You won with ${winDetails.winType || 'BINGO'}!`)}
                   </div>
                   {winDetails.position && (
                     <div style={{ fontSize: '16px', color: '#475569', marginTop: '5px' }}>
-                      Position: {winDetails.position}{getOrdinalSuffix(winDetails.position)}
+                      {useAmharicVoice ? 
+                        `ቦታ: ${winDetails.position}` : 
+                        `Position: ${winDetails.position}${getOrdinalSuffix(winDetails.position)}`}
                     </div>
                   )}
                   {winDetails.prizeAmount && winDetails.prizeAmount > 0 && (
                     <div style={{ fontSize: '20px', fontWeight: 700, color: '#f59e0b', marginTop: '5px' }}>
-                      Prize: ${winDetails.prizeAmount.toFixed(2)}
+                      {useAmharicVoice ? 'ሽልማት' : 'Prize'}: ${winDetails.prizeAmount.toFixed(2)}
                     </div>
                   )}
                 </div>
@@ -2001,7 +2190,7 @@ export default function BingoGame() {
                   display: 'inline-block'
                 }}>
                   <div style={{ fontSize: '14px', color: 'rgba(0,0,0,0.7)' }}>
-                    Winning Cartela
+                    {useAmharicVoice ? 'አሸናፊ ካርቴላ' : 'Winning Cartela'}
                   </div>
                   <div style={{ 
                     fontSize: '28px', 
@@ -2017,7 +2206,8 @@ export default function BingoGame() {
                 display: 'flex', 
                 gap: '15px', 
                 justifyContent: 'center',
-                marginTop: '20px'
+                marginTop: '20px',
+                flexWrap: 'wrap'
               }}>
                 <button
                   onClick={async () => {
@@ -2042,7 +2232,7 @@ export default function BingoGame() {
                   onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
                 >
                   <span style={{ fontSize: '20px' }}>🔄</span>
-                  Play Again
+                  {useAmharicVoice ? 'እንደገና ይጫወቱ' : 'Play Again'}
                 </button>
                 
                 <button
@@ -2070,7 +2260,7 @@ export default function BingoGame() {
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.3)')}
                 >
                   <span style={{ fontSize: '20px' }}>✕</span>
-                  Close & Release Cartela
+                  {useAmharicVoice ? 'ዝጋ እና ካርቴላ ልቀቅ' : 'Close & Release Cartela'}
                 </button>
               </div>
               
@@ -2080,7 +2270,9 @@ export default function BingoGame() {
                 color: 'rgba(0,0,0,0.6)',
                 fontStyle: 'italic'
               }}>
-                Your win has been recorded! Cartela is now available for others. 🎊
+                {useAmharicVoice ? 
+                  'አሸናፊነትዎ ተመዝግቧል! ካርቴላ ለሌሎች ዝግጁ ነው 🎊' :
+                  'Your win has been recorded! Cartela is now available for others. 🎊'}
               </div>
             </div>
           </div>
@@ -2196,7 +2388,10 @@ export default function BingoGame() {
           <div className="stat-item">
             <div>Status</div>
             <div className="stat-value" style={{ color: isWinner ? '#22c55e' : gameEnded ? '#ef4444' : '#f59e0b' }}>
-              {isWinner ? 'BINGO!' : gameEnded ? 'Ended' : gameStatus === 'playing' ? 'Playing' : 'Waiting'}
+              {isWinner ? (useAmharicVoice ? 'ቢንጎ!' : 'BINGO!') : 
+               gameEnded ? (useAmharicVoice ? 'ተጠናቋል' : 'Ended') : 
+               gameStatus === 'playing' ? (useAmharicVoice ? 'በጨወታ ላይ' : 'Playing') : 
+               (useAmharicVoice ? 'በመጠባበቅ ላይ' : 'Waiting')}
             </div>
           </div>
         </div>
@@ -2242,9 +2437,9 @@ export default function BingoGame() {
 
             {/* RIGHT PANEL - CONTROLS & BINGO CARD */}
             <div className="flex-column min-width-0 flex-1 gap-10 overflow-hidden">
-              {/* VOICE CONTROLS */}
+              {/* VOICE CONTROLS - UPDATED WITH AMHARIC TOGGLE */}
               <div className="voice-controls">
-                <div className="flex-center" style={{ gap: '8px', marginBottom: '8px' }}>
+                <div className="flex-center" style={{ gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
                   <button
                     className={`mute-button ${isMuted ? 'muted' : ''}`}
                     onClick={handleMuteToggle}
@@ -2252,6 +2447,31 @@ export default function BingoGame() {
                   >
                     {isMuted ? '🔇' : '🔊'}
                   </button>
+                  
+                  {/* Amharic Toggle Button */}
+                  {amharicVoices.length > 0 && (
+                    <button
+                      onClick={() => setUseAmharicVoice(!useAmharicVoice)}
+                      className={`language-button ${useAmharicVoice ? 'active' : ''}`}
+                      title={useAmharicVoice ? 'Switch to English' : 'Switch to Amharic (አማርኛ)'}
+                      style={{
+                        background: useAmharicVoice ? 'linear-gradient(135deg, #22c55e, #16a34a)' : '#6b7280',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '20px',
+                        padding: '6px 12px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        transition: 'all 0.3s'
+                      }}
+                    >
+                      <span>{useAmharicVoice ? '🇪🇹 አማርኛ' : '🇬🇧 English'}</span>
+                    </button>
+                  )}
+                  
                   <span style={{ fontSize: '14px', fontWeight: '500' }}>Volume:</span>
                   <SpeechSupportIndicator />
                   
@@ -2260,6 +2480,15 @@ export default function BingoGame() {
                       onClick={testSound}
                       className="test-sound-button"
                       title="Test sound"
+                      style={{
+                        background: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '15px',
+                        padding: '4px 12px',
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
                     >
                       🔊 Test
                     </button>
@@ -2308,6 +2537,17 @@ export default function BingoGame() {
                     border: '1px solid rgba(251, 191, 36, 0.3)'
                   }}>
                     👆 <strong>Tap anywhere</strong> to enable game sounds
+                  </div>
+                )}
+                
+                {amharicVoices.length > 0 && (
+                  <div style={{
+                    fontSize: '11px',
+                    color: '#9ca3af',
+                    marginTop: '5px',
+                    textAlign: 'center'
+                  }}>
+                    {useAmharicVoice ? '🔊 በአማርኛ ይነበባል' : '🔊 English voice active'}
                   </div>
                 )}
               </div>
@@ -2405,7 +2645,9 @@ export default function BingoGame() {
                   fontSize: '14px',
                   border: '1px solid #10b981'
                 }}>
-                  ✅ Cartela released and available for others
+                  {useAmharicVoice ? 
+                    '✅ ካርቴላ ተለቋል እና ለሌሎች ዝግጁ ነው' : 
+                    '✅ Cartela released and available for others'}
                 </div>
               )}
 

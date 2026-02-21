@@ -1,3 +1,4 @@
+// C:\Users\hp\Desktop\finishinggbingo\HB\Habesha_Bingo-game-finally-\lib\telegram\bot.ts
 // Server-side only Telegram bot
 import 'server-only'
 import { Telegraf, Markup, Context } from 'telegraf'
@@ -8,6 +9,16 @@ import { message } from 'telegraf/filters'
 // Import your existing database connection
 import { db } from '@/lib/mysql-db'
 
+// Extend Context to include session
+interface BotContext extends Context {
+  session?: {
+    depositMethod?: 'telebirr' | 'cbe';
+    depositAmount?: number;
+    transactionRef?: string;
+    depositStep?: string;
+  }
+}
+
 // We'll use dynamic import for ngrok
 let ngrok: any = null;
 
@@ -16,7 +27,7 @@ const NGROK_AUTH_TOKEN = process.env.NGROK_AUTH_TOKEN
 
 let ngrokUrl: string | null = null
 let botWebhookUrl: string | null = null
-export const bot = new Telegraf(BOT_TOKEN)
+export const bot = new Telegraf<BotContext>(BOT_TOKEN)
 
 // Set bot commands
 const commands = [
@@ -30,6 +41,7 @@ const commands = [
   { command: 'instructions', description: 'Instructions' },
   { command: 'support', description: 'Support' },
   { command: 'about', description: 'About' },
+  { command: 'debug', description: 'Debug deposit issues' },
 ]
 
 // Initialize commands
@@ -109,6 +121,27 @@ export function getBotWebhookUrl(): string | null {
   return botWebhookUrl
 }
 
+// Debug command to check deposit flow
+bot.command('debug', async (ctx) => {
+  const user = ctx.from
+  await ctx.reply(
+    `🔍 **Debug Information**\n\n` +
+    `Environment: ${process.env.NODE_ENV}\n` +
+    `User ID: ${user.id}\n` +
+    `Username: ${user.username || 'N/A'}\n` +
+    `WebApp URL: ${process.env.NEXT_PUBLIC_WEBAPP_URL || 'Not set'}\n\n` +
+    `**Deposit Flow Status:**\n` +
+    `• Screenshot: OPTIONAL (Vercel compatible)\n` +
+    `• Transaction Ref: REQUIRED\n` +
+    `• Works without file upload ✅\n\n` +
+    `If deposit fails, check:\n` +
+    `1. You're registered (/register)\n` +
+    `2. You have transaction reference\n` +
+    `3. Amount is at least 10 Birr`,
+    { parse_mode: 'Markdown' }
+  )
+})
+
 // Start command
 bot.start(async (ctx) => {
   const user = ctx.from
@@ -120,11 +153,11 @@ bot.start(async (ctx) => {
     `💰 Win real money prizes\n` +
     `🎁 Get 50 Birr welcome bonus!\n\n` +
     `Use /register to create your account${referralCode ? `\n\n🔑 Referral code detected: ${referralCode}` : ''}`,
-    Markup.keyboard([
-      ['📋 Register', '🎮 Play'],
-      ['💰 Deposit', '🏧 Withdraw'],
-      ['👥 Invite', '📞 Support']
-    ]).resize()
+    // Markup.keyboard([
+    //   ['📋 Register', '🎮 Play'],
+    //   ['💰 Deposit', '🏧 Withdraw'],
+    //   ['👥 Invite', '📞 Support']
+    // ]).resize()
   )
 })
 
@@ -205,29 +238,471 @@ bot.command('play', async (ctx) => {
   );
 });
 
-// Deposit command
+// DEPOSIT COMMAND - UPDATED FOR VERCEL
 bot.command('deposit', async (ctx) => {
   await ctx.reply(
-    '💵 Deposit Funds\n\n' +
-    'Send money to:\n\n' +
-    '📱 TeleBirr:\n' +
+    '💵 **Deposit Funds**\n\n' +
+    '**Payment Methods:**\n\n' +
+    '📱 **TeleBirr:**\n' +
     '• 0962935163 (Melsew Abebei)\n' +
     '• 0940192676 (Habesha Bingo)\n\n' +
-    '🏦 CBE Birr:\n' +
+    '🏦 **CBE Birr:**\n' +
     '• Account: 1000433547741\n' +
     '• Name: Simegnew Destaw\n\n' +
-    '📌 Instructions:\n' +
-    '1. Send money to any number above\n' +
-    '2. Take screenshot of payment\n' +
-    '3. Send the screenshot here\n\n' +
-    '⚠️ Minimum deposit: 10 Birr\n' +
-    '⏱️ Approval: Within 1-24 hours',
-    Markup.inlineKeyboard([
-      Markup.button.callback('📸 Submit Screenshot', 'submit_deposit'),
-      Markup.button.webApp('💰 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com')
-    ])
+    '**📝 NEW PROCESS (Vercel Compatible):**\n' +
+    '1️⃣ Send money to any number above\n' +
+    '2️⃣ **COPY the Transaction Reference/ID** from your payment app\n' +
+    '3️⃣ Click the button below to submit\n\n' +
+    '⚠️ **Minimum deposit:** 10 Birr\n' +
+    '⏱️ **Approval:** Within 1-24 hours\n\n' +
+    '✅ **Screenshot is OPTIONAL - Transaction Reference is REQUIRED!**\n' +
+    '✅ Works even if screenshot upload fails',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📤 Submit Deposit with Reference', callback_data: 'start_deposit' }],
+          [{ text: '💰 Quick Deposit via Web', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
+          [{ text: '❓ How to get Transaction Ref?', callback_data: 'how_to_get_ref' }]
+        ]
+      }
+    }
   )
 })
+
+// How to get transaction reference
+bot.action('how_to_get_ref', async (ctx) => {
+  await ctx.answerCbQuery()
+  await ctx.reply(
+    '🔑 **How to find Transaction Reference:**\n\n' +
+    '📱 **TeleBirr:**\n' +
+    '• After payment, you\'ll get an SMS\n' +
+    '• Look for "Transaction ID" or "Trx ID"\n' +
+    '• It looks like: *TB23894723*\n\n' +
+    '🏦 **CBE Birr:**\n' +
+    '• Check your SMS confirmation\n' +
+    '• Look for "Reference Number" or "Journal Number"\n' +
+    '• It looks like: *CBE12345678*\n\n' +
+    '📸 **If you can\'t find it:**\n' +
+    '• Take a screenshot of the payment\n' +
+    '• Send it and we\'ll extract the reference',
+    { parse_mode: 'Markdown' }
+  )
+})
+
+// Start deposit flow
+bot.action('start_deposit', async (ctx) => {
+  await ctx.answerCbQuery()
+  
+  // Initialize session
+  ctx.session = {}
+  ctx.session.depositStep = 'method_selection'
+  
+  await ctx.reply(
+    '📝 **Step 1: Select Payment Method**\n\n' +
+    'Which method did you use to send money?',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📱 TeleBirr', callback_data: 'deposit_method_telebirr' }],
+          [{ text: '🏦 CBE Birr', callback_data: 'deposit_method_cbe' }],
+          [{ text: '🔙 Cancel', callback_data: 'cancel_deposit' }]
+        ]
+      }
+    }
+  )
+})
+
+// Cancel deposit
+bot.action('cancel_deposit', async (ctx) => {
+  await ctx.answerCbQuery()
+  ctx.session = {}
+  await ctx.reply('❌ Deposit cancelled. Use /deposit to start over.')
+})
+
+// Handle payment method selection
+bot.action(/deposit_method_(.+)/, async (ctx) => {
+  await ctx.answerCbQuery()
+  const method = ctx.match[1] as 'telebirr' | 'cbe'
+  
+  // Store method in session
+  ctx.session = ctx.session || {}
+  ctx.session.depositMethod = method
+  ctx.session.depositStep = 'amount_input'
+  
+  await ctx.reply(
+    `💰 **Step 2: Enter Amount**\n\n` +
+    `Payment Method: *${method === 'telebirr' ? '📱 TeleBirr' : '🏦 CBE Birr'}*\n\n` +
+    `Please enter the amount you sent (minimum 10 Birr):\n\n` +
+    `*Example: 100*`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        force_reply: true,
+        input_field_placeholder: 'Enter amount in Birr'
+      }
+    }
+  )
+})
+
+// Handle text responses for deposit
+bot.on('text', async (ctx) => {
+  const text = ctx.message.text
+  
+  // DEBUG: Log what's happening
+  console.log('📝 Text received:', text)
+  console.log('📝 Session state:', ctx.session)
+  console.log('📝 Reply to:', ctx.message.reply_to_message?.text)
+  
+  // Handle amount input (when replying to amount prompt)
+  if (ctx.message.reply_to_message?.text?.includes('Step 2: Enter Amount')) {
+    const amount = parseFloat(text)
+    
+    if (isNaN(amount) || amount < 10) {
+      await ctx.reply(
+        '❌ **Invalid amount**\n\n' +
+        'Minimum deposit is 10 Birr.\n' +
+        'Please enter a valid number:',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { force_reply: true }
+        }
+      )
+      return
+    }
+    
+    // Store amount in session
+    ctx.session = ctx.session || {}
+    ctx.session.depositAmount = amount
+    ctx.session.depositStep = 'ref_input'
+    
+    // Ask for transaction reference
+    await ctx.reply(
+      `🔑 **Step 3: Enter Transaction Reference**\n\n` +
+      `Amount: *${amount} Birr*\n\n` +
+      `Please enter the **Transaction Reference/ID** from your payment app:\n\n` +
+      `📱 *For TeleBirr:* Look for "Transaction ID" in payment receipt\n` +
+      `🏦 *For CBE:* Look for "Reference Number"\n\n` +
+      `*Example: TB23894723 or CBE12345678*`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          force_reply: true,
+          input_field_placeholder: 'Enter transaction reference'
+        }
+      }
+    )
+  }
+  
+  // Handle transaction reference input
+  else if (ctx.message.reply_to_message?.text?.includes('Step 3: Enter Transaction Reference')) {
+    const transactionRef = text.trim()
+    
+    if (!transactionRef || transactionRef.length < 3) {
+      await ctx.reply(
+        '❌ **Invalid transaction reference**\n\n' +
+        'Please enter a valid reference (at least 3 characters):',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: { force_reply: true }
+        }
+      )
+      return
+    }
+    
+    // Get stored data from session
+    const amount = ctx.session?.depositAmount
+    const method = ctx.session?.depositMethod
+    
+    if (!amount || !method) {
+      await ctx.reply(
+        '❌ **Session expired**\n\n' +
+        'Your deposit session has expired. Please start over with /deposit',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📤 Start New Deposit', 'start_deposit')]
+        ])
+      )
+      return
+    }
+    
+    // Store transaction ref in session
+    ctx.session.transactionRef = transactionRef
+    ctx.session.depositStep = 'screenshot_option'
+    
+    // Ask if they want to upload screenshot (optional)
+    await ctx.reply(
+      `📸 **Step 4: Screenshot (Optional)**\n\n` +
+      `**Deposit Summary:**\n` +
+      `• Amount: *${amount} Birr*\n` +
+      `• Method: *${method === 'telebirr' ? '📱 TeleBirr' : '🏦 CBE Birr'}*\n` +
+      `• Transaction Ref: *${transactionRef}*\n\n` +
+      `📸 **Screenshot is OPTIONAL**\n\n` +
+      `*Since we're on Vercel, screenshot upload might fail sometimes.*\n` +
+      `*Your deposit will be saved even without screenshot!*\n\n` +
+      `Choose an option:`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📸 Upload Screenshot (Optional)', callback_data: 'deposit_upload_screenshot' }],
+            [{ text: '✅ Submit with Reference Only', callback_data: 'deposit_submit_without_screenshot' }],
+            [{ text: '🔙 Cancel', callback_data: 'cancel_deposit' }]
+          ]
+        }
+      }
+    )
+  }
+})
+
+// Handle screenshot upload option
+bot.action('deposit_upload_screenshot', async (ctx) => {
+  await ctx.answerCbQuery()
+  ctx.session = ctx.session || {}
+  ctx.session.depositStep = 'waiting_screenshot'
+  
+  await ctx.reply(
+    '📸 **Upload Screenshot (Optional)**\n\n' +
+    'Send the payment screenshot now.\n\n' +
+    '⚠️ **If upload fails, your deposit will still be saved!**\n\n' +
+    '👉 To skip screenshot, type /skip',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        force_reply: true
+      }
+    }
+  )
+  
+  // Set a timeout to auto-submit after 2 minutes
+  setTimeout(async () => {
+    if (ctx.session?.depositStep === 'waiting_screenshot' && 
+        ctx.session?.depositAmount && 
+        ctx.session?.transactionRef) {
+      await submitDeposit(ctx, null, '⏱️ Auto-submitted (timeout)')
+    }
+  }, 120000) // 2 minutes
+})
+
+// Handle skip command
+bot.command('skip', async (ctx) => {
+  // Check if we're in deposit flow
+  if (ctx.session?.depositAmount && ctx.session?.transactionRef) {
+    await submitDeposit(ctx, null, '⏭️ Skipped screenshot')
+  } else {
+    await ctx.reply('No pending deposit to skip.')
+  }
+})
+
+// Submit without screenshot
+bot.action('deposit_submit_without_screenshot', async (ctx) => {
+  await ctx.answerCbQuery()
+  await submitDeposit(ctx, null, '✅ Submitted with reference only')
+})
+
+// Handle photo upload (screenshot)
+bot.on('photo', async (ctx) => {
+  console.log('📸 Photo received from user:', ctx.from.id)
+  
+  // Check if we're in deposit flow
+  if (!ctx.session?.depositAmount || !ctx.session?.transactionRef) {
+    await ctx.reply(
+      '⚠️ No pending deposit found.\n\n' +
+      'Please start a deposit first with /deposit',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📤 Start Deposit', 'start_deposit')]
+      ])
+    )
+    return
+  }
+  
+  // Send typing indicator (user sees bot is processing)
+  await ctx.sendChatAction('typing')
+  
+  try {
+    // Get the largest photo (best quality)
+    const photo = ctx.message.photo[ctx.message.photo.length - 1]
+    const fileId = photo.file_id
+    
+    console.log('📸 Processing photo, file_id:', fileId)
+    
+    // Get file URL from Telegram
+    const fileLink = await ctx.telegram.getFileLink(fileId)
+    const screenshotUrl = fileLink.href
+    
+    console.log('📸 Got file link:', screenshotUrl)
+    
+    // Submit deposit with screenshot
+    await submitDeposit(ctx, screenshotUrl, '📸 With screenshot')
+    
+  } catch (error) {
+    console.error('❌ Screenshot upload error:', error)
+    
+    // Even if screenshot fails, still submit with reference only
+    await ctx.reply(
+      '⚠️ **Screenshot upload failed**\n\n' +
+      `Error: ${error.message || 'Unknown error'}\n\n` +
+      'But don\'t worry! Your deposit will still be processed using the transaction reference.',
+      { parse_mode: 'Markdown' }
+    )
+    
+    await submitDeposit(ctx, null, '⚠️ Screenshot failed - using ref only')
+  }
+})
+
+// Helper function to submit deposit
+async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote: string = '') {
+  try {
+    // Send typing indicator
+    await ctx.sendChatAction('typing')
+    
+    const telegramId = ctx.from.id.toString()
+    const amount = ctx.session?.depositAmount
+    const method = ctx.session?.depositMethod
+    const transactionRef = ctx.session?.transactionRef
+    
+    console.log('💾 Submitting deposit:', { telegramId, amount, method, transactionRef, screenshotUrl, sourceNote })
+    
+    if (!amount || !method || !transactionRef) {
+      console.log('❌ Missing deposit info:', { amount, method, transactionRef })
+      await ctx.reply(
+        '❌ **Missing deposit information**\n\n' +
+        'Please start over with /deposit',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📤 Start New Deposit', 'start_deposit')]
+        ])
+      )
+      return
+    }
+    
+    // Get user's UUID from database
+    console.log('🔍 Looking up user by telegram_id:', telegramId)
+    const users = await db.query(
+      'SELECT id, username, balance FROM users WHERE telegram_id = ?',
+      [telegramId]
+    ) as any[]
+    
+    console.log('📊 User lookup result:', users)
+    
+    if (!users || users.length === 0) {
+      await ctx.reply(
+        '❌ **You are not registered**\n\n' +
+        'Please use /register first to create an account.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📝 Register Now', 'start_register')]
+        ])
+      )
+      return
+    }
+    
+    const userUuid = users[0].id
+    
+    // Insert deposit record - screenshot_url can be NULL
+    console.log('💾 Inserting deposit record...')
+    const insertResult = await db.query(
+      `INSERT INTO deposits 
+      (user_id, amount, method, transaction_ref, screenshot_url, status) 
+      VALUES (?, ?, ?, ?, ?, 'pending')`,
+      [userUuid, amount, method, transactionRef, screenshotUrl]
+    )
+    
+    console.log('✅ Deposit inserted successfully:', insertResult)
+    
+    // Clear session
+    const depositInfo = { ...ctx.session }
+    ctx.session = {}
+    
+    // Success message
+    let successMessage = 
+      `✅ **Deposit Request Submitted!**\n\n` +
+      `💰 **Amount:** ${amount} Birr\n` +
+      `🔑 **Transaction Ref:** \`${transactionRef}\`\n` +
+      `📱 **Method:** ${method === 'telebirr' ? 'TeleBirr' : 'CBE Birr'}\n` +
+      `⏱️ **Status:** Pending Approval\n\n`
+    
+    if (screenshotUrl) {
+      successMessage += `📸 Screenshot received ✅\n`
+    } else {
+      successMessage += `📝 *Submitted with transaction reference only*\n`
+    }
+    
+    if (sourceNote) {
+      successMessage += `${sourceNote}\n`
+    }
+    
+    successMessage += `\n**What happens next?**\n` +
+      `1️⃣ Admin will verify your transaction using the reference number\n` +
+      `2️⃣ If approved, balance will be added within 1-24 hours\n` +
+      `3️⃣ You'll receive a notification\n\n` +
+      `📞 Need help? Contact @HabeshaBingoSupport`
+    
+    await ctx.reply(successMessage, { parse_mode: 'Markdown' })
+    
+    // Notify admins
+    await notifyAdminsOfDeposit(ctx, userUuid, amount, method, transactionRef, screenshotUrl, users[0].username)
+    
+  } catch (error) {
+    console.error('❌ Deposit submission error:', error)
+    
+    // Detailed error message for user
+    let errorMessage = '❌ **Failed to submit deposit**\n\n'
+    
+    if (error.code === 'ER_DUP_ENTRY') {
+      errorMessage += 'This transaction reference already exists in our system.\n\n'
+    } else if (error.code === 'ER_NO_REFERENCE') {
+      errorMessage += 'Database connection error.\n\n'
+    } else {
+      errorMessage += `Error: ${error.message || 'Unknown error'}\n\n`
+    }
+    
+    errorMessage += 'Please try again or contact support.\n' +
+      'Save your transaction reference for manual verification.'
+    
+    await ctx.reply(
+      errorMessage,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Try Again', 'start_deposit')],
+        [Markup.button.url('📞 Contact Support', 'https://t.me/HabeshaBingoSupport')]
+      ])
+    )
+  }
+}
+
+// Notify admins
+async function notifyAdminsOfDeposit(ctx: any, userId: string, amount: number, method: string, transactionRef: string, screenshotUrl: string | null, username: string) {
+  try {
+    console.log('🔔 Notifying admins...')
+    
+    // Get admin chat IDs from database
+    const admins = await db.query(
+      'SELECT telegram_id FROM users WHERE role IN ("admin", "superadmin") AND telegram_id IS NOT NULL'
+    ) as any[]
+    
+    console.log(`👥 Found ${admins.length} admins to notify`)
+    
+    for (const admin of admins) {
+      try {
+        await ctx.telegram.sendMessage(
+          admin.telegram_id,
+          `🔔 **New Deposit Request**\n\n` +
+          `👤 User: ${username || 'Unknown'} (${userId})\n` +
+          `💰 Amount: ${amount} Birr\n` +
+          `📱 Method: ${method}\n` +
+          `🔑 Transaction Ref: \`${transactionRef}\`\n` +
+          `📸 Screenshot: ${screenshotUrl ? '✅ Uploaded' : '❌ Not provided'}\n` +
+          `🕐 Time: ${new Date().toLocaleString()}\n\n` +
+          `Check admin panel to approve/reject.`,
+          { parse_mode: 'Markdown' }
+        )
+        console.log(`✅ Notified admin: ${admin.telegram_id}`)
+      } catch (e) {
+        console.error(`❌ Failed to notify admin ${admin.telegram_id}:`, e)
+      }
+    }
+  } catch (error) {
+    console.error('Admin notification error:', error)
+  }
+}
 
 // Balance command
 bot.command('balance', async (ctx) => {
@@ -246,16 +721,21 @@ bot.command('balance', async (ctx) => {
     const user = users[0]
     
     await ctx.reply(
-      `💰 Your Wallet\n\n` +
-      `💳 Main Balance: ${user.balance} Birr\n` +
-      `🎁 Bonus Balance: ${user.bonus_balance} Birr\n` +
-      `🎯 Total Balance: ${user.balance + user.bonus_balance} Birr\n\n` +
+      `💰 **Your Wallet**\n\n` +
+      `💳 Main Balance: *${user.balance} Birr*\n` +
+      `🎁 Bonus Balance: *${user.bonus_balance} Birr*\n` +
+      `🎯 Total Balance: *${user.balance + user.bonus_balance} Birr*\n\n` +
       `💸 Use /deposit to add funds\n` +
       `🏧 Use /withdraw to cash out`,
-      Markup.inlineKeyboard([
-        Markup.button.webApp('💸 Quick Deposit', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com'),
-        Markup.button.webApp('🏧 Quick Withdraw', process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com')
-      ])
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💸 Quick Deposit', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/deposit' } }],
+            [{ text: '🏧 Quick Withdraw', web_app: { url: process.env.NEXT_PUBLIC_WEBAPP_URL || 'https://habeshabingo.devvoltz.com/withdraw' } }]
+          ]
+        }
+      }
     )
   } catch (error) {
     console.error('Balance error:', error)
@@ -266,17 +746,20 @@ bot.command('balance', async (ctx) => {
 // Withdraw command
 bot.command('withdraw', async (ctx) => {
   await ctx.reply(
-    '🏧 Withdraw Funds\n\n' +
+    '🏧 **Withdraw Funds**\n\n' +
     '💰 Available Balance: Check /balance\n' +
     '📝 Minimum Withdrawal: 10 Birr\n' +
     '⏱️ Processing Time: 1-24 hours\n\n' +
     'Please send:\n' +
-    '1. Amount (Birr)\n' +
-    '2. Account number\n\n' +
-    'Example:\n' +
+    '1️⃣ Amount (Birr)\n' +
+    '2️⃣ Account number\n\n' +
+    '**Example:**\n' +
     '`50\n0911-123-4567`\n\n' +
     'Send in this format:',
-    Markup.forceReply()
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { force_reply: true }
+    }
   )
 })
 
@@ -298,16 +781,20 @@ bot.command('invite', async (ctx) => {
     const referralLink = `https://t.me/${ctx.botInfo.username}?start=${referralCode}`
     
     await ctx.reply(
-      `👥 Refer & Earn\n\n` +
+      `👥 **Refer & Earn**\n\n` +
       `🎁 Earn 10 Birr for each friend who joins!\n\n` +
-      `🔑 Your Referral Code: ${referralCode}\n\n` +
+      `🔑 Your Referral Code: \`${referralCode}\`\n\n` +
       `📱 Share this link:\n` +
-      referralLink,
-      Markup.inlineKeyboard([
-        Markup.button.url('📱 Share on Telegram', 
-          `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}`),
-        Markup.button.callback('📊 My Referrals', 'view_referrals')
-      ])
+      `${referralLink}`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📱 Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}` }],
+            [{ text: '📊 My Referrals', callback_data: 'view_referrals' }]
+          ]
+        }
+      }
     )
   } catch (error) {
     console.error('Invite error:', error)
@@ -318,7 +805,11 @@ bot.command('invite', async (ctx) => {
 // Callback handlers
 bot.action('submit_deposit', async (ctx) => {
   await ctx.answerCbQuery()
-  await ctx.reply('📸 Please send the payment screenshot')
+  await ctx.reply(
+    '📸 **Please send the payment screenshot**\n\n' +
+    'Or if you have transaction reference, use /deposit instead.',
+    { parse_mode: 'Markdown' }
+  )
 })
 
 bot.action('view_referrals', async (ctx) => {
@@ -333,10 +824,11 @@ bot.action('view_referrals', async (ctx) => {
     const referralCount = result && result[0]?.count || 0
     
     await ctx.reply(
-      `📊 Referral Statistics:\n\n` +
-      `👥 Total Referrals: ${referralCount}\n` +
-      `💰 Total Earned: ${referralCount * 10} Birr\n` +
-      `🏆 Keep referring to earn more!`
+      `📊 **Referral Statistics:**\n\n` +
+      `👥 Total Referrals: *${referralCount}*\n` +
+      `💰 Total Earned: *${referralCount * 10} Birr*\n` +
+      `🏆 Keep referring to earn more!`,
+      { parse_mode: 'Markdown' }
     )
   } catch (error) {
     console.error('Referral stats error:', error)
@@ -344,46 +836,41 @@ bot.action('view_referrals', async (ctx) => {
   }
 })
 
-// Handle photo for deposit
+// Handle photo for deposit (legacy)
 bot.on('photo', async (ctx) => {
-  await ctx.reply(
-    '📸 Screenshot received!\n\n' +
-    'Now please send the deposit amount (Birr):\n' +
-    'Example: 100',
-    Markup.forceReply()
-  )
+  // This is handled above, but keeping as fallback
+  if (!ctx.session?.depositAmount) {
+    await ctx.reply(
+      '📸 Screenshot received!\n\n' +
+      'To submit a deposit with this screenshot, please use /deposit command first.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📤 Start Deposit', 'start_deposit')]
+      ])
+    )
+  }
 })
 
-// Handle text responses
+// Handle text responses (legacy deposit flow - kept for backward compatibility)
 bot.on('text', async (ctx) => {
   const text = ctx.message.text
   
-  // Handle deposit amount
+  // Handle deposit amount (legacy)
   if (ctx.message.reply_to_message?.text?.includes('deposit amount')) {
     const amount = parseFloat(text)
     
     if (isNaN(amount) || amount < 10) {
-      await ctx.reply('❌ Invalid amount. Minimum deposit is 10 Birr.')
+      await ctx.reply('❌ Invalid amount. Minimum deposit is 10 Birr.\nPlease use /deposit for the new flow.')
       return
     }
     
-    // Create deposit record in database
-    try {
-      await db.query(
-        'INSERT INTO deposits (telegram_id, amount, status, created_at) VALUES (?, ?, "pending", NOW())',
-        [ctx.from.id.toString(), amount]
-      )
-      
-      await ctx.reply(
-        `✅ Deposit Request Submitted!\n\n` +
-        `💰 Amount: ${amount} Birr\n` +
-        `⏱️ Status: Pending approval\n\n` +
-        `Admin will review within 1-24 hours.`
-      )
-    } catch (error) {
-      console.error('Deposit error:', error)
-      await ctx.reply('❌ Failed to process deposit. Please try again.')
-    }
+    await ctx.reply(
+      '⚠️ **Legacy deposit flow detected**\n\n' +
+      'Please use the new deposit flow with /deposit command.\n' +
+      'It requires transaction reference and works better on Vercel.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📤 Use New Deposit Flow', 'start_deposit')]
+      ])
+    )
   }
   
   // Handle withdrawal details
@@ -391,7 +878,7 @@ bot.on('text', async (ctx) => {
     const lines = text.split('\n')
     
     if (lines.length < 2) {
-      await ctx.reply('❌ Invalid format. Please send:\nAmount\\nAccountNumber')
+      await ctx.reply('❌ Invalid format. Please send:\nAmount\nAccountNumber')
       return
     }
     
@@ -427,11 +914,12 @@ bot.on('text', async (ctx) => {
       )
       
       await ctx.reply(
-        `✅ Withdrawal Request Submitted!\n\n` +
-        `💰 Amount: ${amount} Birr\n` +
-        `📱 Account: ${accountNumber}\n` +
+        `✅ **Withdrawal Request Submitted!**\n\n` +
+        `💰 Amount: *${amount} Birr*\n` +
+        `📱 Account: \`${accountNumber}\`\n` +
         `⏱️ Status: Pending approval\n\n` +
-        `You'll be notified once approved.`
+        `You'll be notified once approved.`,
+        { parse_mode: 'Markdown' }
       )
     } catch (error) {
       console.error('Withdrawal error:', error)
@@ -441,15 +929,32 @@ bot.on('text', async (ctx) => {
 })
 
 // Error handling
-bot.catch((err: any, ctx: Context) => {
-  console.error(`Error for ${ctx.updateType}:`, err)
-  ctx.reply('❌ An error occurred. Please try again.')
+bot.catch((err: any, ctx: BotContext) => {
+  console.error(`❌ Error for ${ctx.updateType}:`, err)
+  
+  // Send user-friendly error message
+  ctx.reply(
+    '❌ **An error occurred**\n\n' +
+    `Error: ${err.message || 'Unknown error'}\n\n` +
+    'Please try again or contact support if the issue persists.',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📞 Contact Support', url: 'https://t.me/HabeshaBingoSupport' }],
+          [{ text: '🔄 Try Again', callback_data: 'start_deposit' }]
+        ]
+      }
+    }
+  ).catch(e => console.error('Failed to send error message:', e))
 })
 
 // Start bot
 export async function startBot() {
   try {
     console.log('🤖 Starting Habesha Bingo Bot...')
+    console.log('📝 Environment:', process.env.NODE_ENV)
+    console.log('📝 WebApp URL:', process.env.NEXT_PUBLIC_WEBAPP_URL)
     
     // Only try ngrok in development
     if (process.env.NODE_ENV === 'development') {
