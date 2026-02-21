@@ -1,4 +1,4 @@
-// components/game/card-picker.tsx - COMPLETE UPDATED VERSION WITH WAITING STATE
+// components/game/card-picker.tsx - UPDATED FOR 50-SECOND HOLD
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -9,7 +9,7 @@ import {
   StarFill, TrophyFill, Coin, Grid3x3GapFill,
   Search, Filter, SortNumericDown, SortNumericUpAlt,
   LightningChargeFill, AwardFill, GiftFill,
-  Dice5Fill, Stars, PeopleFill, ClockFill
+  Dice5Fill, Stars, PeopleFill, ClockFill, HourglassSplit
 } from 'react-bootstrap-icons';
 import dynamic from 'next/dynamic';
 import { useGameStore } from '@/lib/game-store';
@@ -44,6 +44,9 @@ interface Cartela {
   popularity?: number;
   waiting_user_id?: string | null;
   waiting_expires_at?: string | null;
+  waiting_seconds_remaining?: number | null;
+  waiting_username?: string | null;
+  waiting_first_name?: string | null;
 }
 
 interface User {
@@ -137,6 +140,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const winnerPollingRef = useRef<NodeJS.Timeout | null>(null);
   const waitingPollingRef = useRef<NodeJS.Timeout | null>(null);
+  const cartelaRefreshRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize and fetch data
   useEffect(() => {
@@ -162,12 +166,18 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     fetchCartelas();
     startWaitingCartelaPolling();
 
+    // Auto-refresh cartelas every 10 seconds to update waiting statuses
+    cartelaRefreshRef.current = setInterval(() => {
+      fetchCartelas();
+    }, 10000);
+
     // Cleanup on unmount
     return () => {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
       if (winnerPollingRef.current) clearInterval(winnerPollingRef.current);
       if (waitingPollingRef.current) clearInterval(waitingPollingRef.current);
       if (waitingExpiryInterval) clearInterval(waitingExpiryInterval);
+      if (cartelaRefreshRef.current) clearInterval(cartelaRefreshRef.current);
     };
   }, []);
 
@@ -222,14 +232,18 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         const numB = parseInt(b.cartela_number);
         return sortOrder === 'asc' ? numA - numB : numB - numA;
       } else {
-        // Sort by availability (available first, then waiting, then in_game)
-        const getStatusPriority = (status?: string) => {
+        // Sort by availability (available first, then waiting with time left, then in_game)
+        const getStatusPriority = (status?: string, secondsRemaining?: number | null) => {
           if (status === 'available') return 0;
-          if (status === 'waiting') return 1;
-          return 2;
+          if (status === 'waiting') {
+            // Waiting with less time left appears higher (will become available soon)
+            if (secondsRemaining && secondsRemaining < 10) return 1;
+            return 2;
+          }
+          return 3;
         };
-        const priorityA = getStatusPriority(a.status);
-        const priorityB = getStatusPriority(b.status);
+        const priorityA = getStatusPriority(a.status, a.waiting_seconds_remaining);
+        const priorityB = getStatusPriority(b.status, b.waiting_seconds_remaining);
         return sortOrder === 'asc' ? priorityA - priorityB : priorityB - priorityA;
       }
     });
@@ -237,7 +251,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     setFilteredCartelas(result);
   }, [cartelas, searchTerm, sortBy, sortOrder]);
 
-  // Update expiry countdown
+  // Update expiry countdown for selected cartela
   useEffect(() => {
     if (myWaitingCartela && waitingExpiryTime !== null) {
       if (waitingExpiryInterval) {
@@ -249,12 +263,17 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
           if (prev && prev > 0) {
             return prev - 1;
           } else {
-            // Expired
+            // Expired - release automatically
             setMyWaitingCartela(null);
             setSelectedCartela(null);
             setBingoCardNumbers([]);
             setGeneratedCardData(null);
             clearInterval(interval);
+            
+           
+            
+            // Refresh cartelas to show updated status
+            fetchCartelas();
             return null;
           }
         });
@@ -374,6 +393,26 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       
       if (data.success) {
         setCartelas(data.cartelas);
+        
+        // Update my waiting cartela if it exists
+        if (currentUser && myWaitingCartela) {
+          const updatedMyCartela = data.cartelas.find((c: Cartela) => c.id === myWaitingCartela.id);
+          if (updatedMyCartela) {
+            if (updatedMyCartela.status !== 'waiting' || updatedMyCartela.waiting_user_id !== currentUser.id) {
+              // My cartela is no longer waiting for me - release it
+              setMyWaitingCartela(null);
+              setSelectedCartela(null);
+              setBingoCardNumbers([]);
+              setGeneratedCardData(null);
+              setWaitingExpiryTime(null);
+              
+             
+            } else if (updatedMyCartela.waiting_seconds_remaining) {
+              // Update expiry time
+              setWaitingExpiryTime(updatedMyCartela.waiting_seconds_remaining);
+            }
+          }
+        }
       }
     } catch (error) {
       console.error('Error fetching cartelas:', error);
@@ -403,23 +442,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
             };
           });
           setWaitingCartelas(waitingMap);
-          
-          // Check if my waiting cartela is still valid
-          if (myWaitingCartela && currentUser) {
-            const myWaiting = waitingMap[myWaitingCartela.id];
-            if (!myWaiting || myWaiting.userId !== currentUser.id) {
-              // My waiting cartela was released or taken by someone else
-              setMyWaitingCartela(null);
-              setWaitingExpiryTime(null);
-              setSelectedCartela(null);
-              setBingoCardNumbers([]);
-              setGeneratedCardData(null);
-              alert('Your cartela selection has expired or been released');
-            } else {
-              // Update expiry time
-              setWaitingExpiryTime(myWaiting.expiresInSeconds);
-            }
-          }
         }
       } catch (error) {
         console.error('Error polling waiting cartelas:', error);
@@ -431,7 +453,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
 
     // Then poll every 2 seconds
     waitingPollingRef.current = setInterval(pollWaitingCartelas, 2000);
-  }, [myWaitingCartela, currentUser]);
+  }, []);
 
   const playSound = useCallback((soundType: 'click' | 'confirm' | 'select' = 'click') => {
     if (!soundEnabled) return;
@@ -459,15 +481,19 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
 
   const handleCartelaSelect = async (cartela: Cartela) => {
     // Check if cartela is taken by someone else waiting
-    if (waitingCartelas[cartela.id] && waitingCartelas[cartela.id].userId !== currentUser?.id) {
+    if (cartela.status === 'waiting' && cartela.waiting_user_id !== currentUser?.id) {
       playSound('click');
-      alert(`Cartela ${cartela.cartela_number} is already selected by ${waitingCartelas[cartela.id].username || 'another user'}`);
-      return;
+      
+      // Show who has it and how much time left
+      const waiterName = cartela.waiting_first_name || cartela.waiting_username || 'Another user';
+      const timeLeft = cartela.waiting_seconds_remaining || 0;
+      
+      
     }
     
-    if (!cartela.is_available && cartela.status !== 'waiting') {
+    if (cartela.status === 'in_game') {
       playSound('click');
-      alert(`Cartela ${cartela.cartela_number} is already in a game`);
+      alert(`Cartela ${cartela.cartela_number} is already in an active game`);
       return;
     }
     
@@ -481,7 +507,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     setIsLoading(true);
     
     try {
-      // First, select the cartela for waiting
+      // First, select the cartela for waiting (50-second hold)
       const selectResponse = await fetch('/api/game/cartelas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -500,7 +526,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         return;
       }
       
-      // Then generate preview
+      // Then generate preview (using deterministic card)
       const previewResponse = await fetch('/api/game/cartelas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -519,7 +545,9 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         setGeneratedCardData(previewData.cardData);
         setSelectedCartela(cartela);
         setMyWaitingCartela(cartela);
-        setWaitingExpiryTime(selectData.expiresIn || 300);
+        setWaitingExpiryTime(selectData.expiresIn || 50); // 50 seconds hold time
+        
+      
         
         // Refresh cartelas to show updated status
         fetchCartelas();
@@ -539,11 +567,14 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     
     setIsLoading(true);
     try {
-      const response = await fetch('/api/game/cartelas/waiting?' + new URLSearchParams({
-        cartelaId: selectedCartela.id.toString(),
-        userId: currentUser.id
-      }), {
-        method: 'DELETE'
+      const response = await fetch('/api/game/cartelas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cartelaId: selectedCartela.id,
+          userId: currentUser.id,
+          action: 'release_waiting'
+        })
       });
       
       const data = await response.json();
@@ -555,6 +586,8 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         setMyWaitingCartela(null);
         setWaitingExpiryTime(null);
         playSound('click');
+        
+        
         
         // Refresh cartelas to show updated status
         fetchCartelas();
@@ -575,9 +608,9 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       return;
     }
     
-    // Verify cartela is still waiting for us
-    if (waitingCartelas[selectedCartela.id]?.userId !== currentUser.id) {
-      alert('Your cartela selection has expired. Please select again.');
+    // Verify cartela is still waiting for us and not expired
+    if (waitingExpiryTime && waitingExpiryTime <= 0) {
+      alert('Your 50-second selection period has expired. Please select again.');
       setSelectedCartela(null);
       setMyWaitingCartela(null);
       return;
@@ -650,8 +683,11 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       
       let errorMessage = error.message || 'Failed to start game';
       
-      if (error.message.includes('not iterable')) {
-        errorMessage = 'Server returned invalid data format. Please try again.';
+      if (error.message.includes('expired')) {
+        errorMessage = 'Your 50-second selection period has expired. Please select again.';
+        setSelectedCartela(null);
+        setMyWaitingCartela(null);
+        setWaitingExpiryTime(null);
       }
       
       alert(errorMessage);
@@ -938,14 +974,26 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     playSound('click');
   };
 
-  useEffect(() => {
-    console.log('🎮 Game states:', {
-      showBingoGame,
-      showCountdown,
-      gameSession,
-      hasBingoGameData: !!bingoGameData
-    });
-  }, [showBingoGame, showCountdown, gameSession, bingoGameData]);
+  // Format time for display
+  const formatTime = (seconds: number): string => {
+    return `${seconds}s`;
+  };
+
+  // Get cartela status display
+  const getCartelaStatusDisplay = (cartela: Cartela) => {
+    if (cartela.status === 'available') {
+      return { bg: 'bg-green-100', text: 'text-green-700', hover: 'hover:bg-green-200', label: 'Available' };
+    } else if (cartela.status === 'waiting') {
+      if (cartela.waiting_user_id === currentUser?.id) {
+        return { bg: 'bg-blue-100', text: 'text-blue-700', hover: 'hover:bg-blue-200', label: 'Your Selection' };
+      } else {
+        return { bg: 'bg-yellow-100', text: 'text-yellow-700', hover: '', label: `Selected by ${cartela.waiting_first_name || cartela.waiting_username || 'Another user'}` };
+      }
+    } else if (cartela.status === 'in_game') {
+      return { bg: 'bg-red-100', text: 'text-red-500', hover: '', label: 'In Game' };
+    }
+    return { bg: 'bg-gray-100', text: 'text-gray-500', hover: '', label: 'Unknown' };
+  };
 
   if (userLoading) {
     return (
@@ -1007,9 +1055,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         >
           Logout
         </button>
-
-       
-
       </div>
     )}
 
@@ -1026,7 +1071,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
                   <h1 className="text-2xl font-bold text-green-700">
                     Welcome, {currentUser.firstName}
                   </h1>
-                  <p className="text-green-600">@{currentUser.username}</p>
+                  
                 </div>
 
                 <div className="flex gap-6">
@@ -1037,12 +1082,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
                     </p>
                   </div>
 
-                  <div className="bg-emerald-50 px-4 py-3 rounded-xl">
-                    <p className="text-sm text-emerald-500">Waiting</p>
-                    <p className="font-bold text-emerald-700">
-                      {Object.keys(waitingCartelas).length}
-                    </p>
-                  </div>
+                  
                 </div>
 
               </div>
@@ -1061,67 +1101,135 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
             )}
           </div>
 
+         
+          
+
           {/* MAIN GRID */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
             {/* LEFT - CARTELA SELECTION */}
             <div className="bg-white rounded-3xl shadow-lg p-6 border border-green-100">
-              <h2 className="text-xl font-bold text-green-700 mb-4">
-                Select Your Cartela
-              </h2>
+              <div className="flex justify-between items-center mb-4">
+                
+                
+                {/* Search and filter controls */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Search cartela #"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="px-3 py-1 border border-green-200 rounded-lg text-sm"
+                  />
+                  <button
+                    onClick={toggleSortOrder}
+                    className="p-2 bg-green-100 rounded-lg hover:bg-green-200"
+                    title={`Sort ${sortOrder === 'asc' ? 'Ascending' : 'Descending'}`}
+                  >
+                    {sortOrder === 'asc' ? <SortNumericDown /> : <SortNumericUpAlt />}
+                  </button>
+                </div>
+              </div>
 
-              <div className="grid grid-cols-6 md:grid-cols-8 gap-3 max-h-[400px] overflow-y-auto">
+              <div className="grid grid-cols-6 md:grid-cols-8 gap-3 max-h-[400px] overflow-y-auto p-1">
                 {filteredCartelas.map((cartela) => {
-                  const isWaiting = waitingCartelas[cartela.id];
-                  const isMyWaiting = isWaiting && isWaiting.userId === currentUser?.id;
-                  const isTakenByOther = isWaiting && !isMyWaiting;
+                  const statusStyle = getCartelaStatusDisplay(cartela);
+                  const isMyWaiting = cartela.status === 'waiting' && cartela.waiting_user_id === currentUser?.id;
+                  const isTakenByOther = cartela.status === 'waiting' && !isMyWaiting;
+                  
+                  // Determine if cartela is clickable
+                  const isClickable = 
+                    (cartela.status === 'available') || 
+                    (isMyWaiting) ||
+                    (cartela.status === 'waiting' && cartela.waiting_user_id === currentUser?.id);
 
                   return (
                     <div
                       key={cartela.id}
                       onClick={() => {
-                        if (cartela.status === 'available' || isMyWaiting) {
+                        if (isClickable && !isLoading) {
                           handleCartelaSelect(cartela);
+                        } else if (isTakenByOther) {
+                          // Show who has it and time left
+                          const waiterName = cartela.waiting_first_name || cartela.waiting_username || 'Another user';
+                          alert(`⏳ Cartela ${cartela.cartela_number} is currently selected by ${waiterName}. It will become available in ${cartela.waiting_seconds_remaining || 0} seconds.`);
                         }
                       }}
-                      className={`aspect-square flex items-center justify-center rounded-xl text-sm font-semibold transition cursor-pointer
-                        ${
-                          selectedCartela?.id === cartela.id
-                            ? 'bg-green-600 text-white shadow-lg scale-105'
-                            : cartela.status === 'available'
-                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                            : isTakenByOther
-                            ? 'bg-yellow-100 text-yellow-600'
-                            : 'bg-red-100 text-red-500'
-                        }`}
+                      className={`
+                        aspect-square flex flex-col items-center justify-center 
+                        rounded-xl text-sm font-semibold transition-all
+                        ${statusStyle.bg} ${statusStyle.text}
+                        ${isClickable ? 'cursor-pointer hover:scale-105' : 'cursor-not-allowed opacity-75'}
+                        ${selectedCartela?.id === cartela.id ? 'ring-4 ring-green-500 ring-opacity-50 scale-105' : ''}
+                        relative
+                      `}
+                      title={statusStyle.label}
                     >
-                      {cartela.cartela_number}
+                      <span>{cartela.cartela_number}</span>
+                      
+                      {/* Show timer for waiting cartelas */}
+                      {cartela.status === 'waiting' && cartela.waiting_seconds_remaining && (
+                        <span className="absolute -top-1 -right-1 bg-white rounded-full text-xs px-1 min-w-[20px] text-center shadow">
+                          {cartela.waiting_seconds_remaining}s
+                        </span>
+                      )}
+                      
+                      {/* Icon indicators */}
+                      {cartela.status === 'waiting' && isTakenByOther && (
+                        <ClockFill size={12} className="absolute -bottom-1 -right-1 text-yellow-600" />
+                      )}
+                      {cartela.status === 'in_game' && (
+                        <span className="absolute -bottom-1 -right-1 text-red-500 text-xs">🎮</span>
+                      )}
                     </div>
                   );
                 })}
               </div>
-
-              {selectedCartela && (
-                <div className="mt-6 p-4 bg-green-50 rounded-2xl flex justify-between items-center">
-                  <p className="text-green-700 font-semibold">
-                    Selected: {selectedCartela.cartela_number}
-                  </p>
-
+ {/* ===== SELECTED CARTELA INFO - ALWAYS VISIBLE WHEN CARTELA IS SELECTED ===== */}
+              {selectedCartela && myWaitingCartela && waitingExpiryTime !== null && (
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl shadow-lg p-2 mb-2 text-white">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+              
+                
+                <div className="flex gap-3">
                   <button
                     onClick={startMultiplayerGame}
-                    disabled={isLoading}
-                    className="px-6 py-2 bg-green-600 text-white rounded-xl shadow hover:shadow-lg transition disabled:opacity-50"
+                    disabled={isLoading || waitingExpiryTime <= 0}
+                    className="px-8 py-4 bg-yellow-400 text-blue-900 rounded-xl font-bold text-lg shadow-lg hover:bg-yellow-300 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                   >
-                    {isLoading ? 'Joining...' : 'Start Game'}
+                    {isLoading ? 'Starting...' : '🚀 START GAME NOW'}
+                  </button>
+                  
+                  <button
+                    onClick={releaseCartela}
+                    disabled={isLoading}
+                    className="px-6 py-4 bg-white/20 text-white rounded-xl font-semibold backdrop-blur-sm hover:bg-white/30 transition disabled:opacity-50"
+                  >
+                    Cancel
                   </button>
                 </div>
-              )}
+              </div>
+              
+              {/* Progress bar for time remaining */}
+              <div className="mt-4 w-full bg-white/30 rounded-full h-3">
+                <div 
+                  className="bg-yellow-400 h-3 rounded-full transition-all duration-1000"
+                  style={{ width: `${(waitingExpiryTime / 50) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
             </div>
 
             {/* RIGHT - PREVIEW */}
             <div className="bg-white rounded-3xl shadow-lg p-6 border border-green-100">
               <h3 className="text-xl font-bold text-green-700 mb-6">
                 BINGO Card Preview
+                {selectedCartela && (
+                  <span className="text-sm font-normal text-green-500 ml-2">
+                    (Cartela #{selectedCartela.cartela_number})
+                  </span>
+                )}
               </h3>
 
               <div className="grid grid-cols-5 gap-3">
@@ -1129,22 +1237,35 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
                   bingoCardNumbers.map((num, index) => (
                     <div
                       key={index}
-                      className={`aspect-square flex items-center justify-center rounded-xl font-bold text-lg
-                        ${
-                          index === 12
-                            ? 'bg-green-600 text-white'
-                            : 'bg-green-50 text-green-700'
-                        }`}
+                      className={`
+                        aspect-square flex items-center justify-center rounded-xl font-bold text-lg
+                        ${index === 12
+                          ? 'bg-green-600 text-white'
+                          : index % 5 === 0 ? 'bg-blue-50 text-blue-700'   // B column
+                          : index % 5 === 1 ? 'bg-indigo-50 text-indigo-700' // I column
+                          : index % 5 === 2 ? 'bg-purple-50 text-purple-700' // N column
+                          : index % 5 === 3 ? 'bg-pink-50 text-pink-700'    // G column
+                          : 'bg-orange-50 text-orange-700'                  // O column
+                        }
+                      `}
                     >
                       {index === 12 ? 'FREE' : num}
                     </div>
                   ))
                 ) : (
                   <div className="col-span-5 text-center text-green-400 py-12">
-                    Select a cartela to preview your card
+                    Select a cartela to preview your deterministic card
                   </div>
                 )}
               </div>
+
+              {/* Card info */}
+              {selectedCartela && (
+                <div className="mt-6 text-sm text-green-600 text-center border-t border-green-100 pt-4">
+                  <p>✨ This card is permanently assigned to Cartela #{selectedCartela.cartela_number}</p>
+                  <p className="text-xs text-green-400 mt-1">Same card every time you select this cartela</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1152,6 +1273,11 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
           {currentUser && (
             <div className="mt-8 bg-white rounded-2xl p-4 border border-green-100 text-green-600 text-sm text-center">
               Playing as {currentUser.firstName} • Session ID: {currentUser.id?.substring(0, 8)}...
+              {myWaitingCartela && (
+                <span className="ml-2 text-blue-600 font-semibold">
+                  • Cartela #{myWaitingCartela.cartela_number} selected ({waitingExpiryTime}s remaining)
+                </span>
+              )}
             </div>
           )}
         </>

@@ -1,4 +1,4 @@
-// components/game/bingo-game.tsx
+// components/game/bingo-game.tsx - COMPLETE UPDATED VERSION WITH CARTELA RELEASE
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
@@ -101,6 +101,7 @@ interface MultiplayerSession {
   code: string;
   userId: string;
   sessionId: number;
+  cartelaId?: number;
   status: 'waiting' | 'countdown' | 'active' | 'finished';
 }
 
@@ -281,7 +282,7 @@ export default function BingoGame() {
   const [countdown, setCountdown] = useState<number>(50);
   const [playersReady, setPlayersReady] = useState<Record<string, boolean>>({});
   
-  // NEW: Game ended state
+  // Game ended state
   const [gameEnded, setGameEnded] = useState(false);
   const [winnerAnnouncement, setWinnerAnnouncement] = useState<WinnerAnnouncement | null>(null);
   const [winnerHistory, setWinnerHistory] = useState<WinnerHistoryItem[]>([]);
@@ -321,6 +322,99 @@ export default function BingoGame() {
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const autoTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedRef = useRef(false);
+  const cartelaReleasedRef = useRef(false);
+
+  // ==================== CARTELA RELEASE FUNCTION ====================
+  const releaseCartelaAfterGame = useCallback(async () => {
+    // Prevent multiple releases
+    if (cartelaReleasedRef.current) {
+      console.log('Cartela already released, skipping');
+      return;
+    }
+    
+    console.log('🔄 Attempting to release cartela after game...');
+    
+    // Get cartela ID from various possible sources
+    let cartelaIdToRelease = null;
+    
+    // Try to get from gameState
+    if (gameState?.cartela?.id) {
+      cartelaIdToRelease = gameState.cartela.id;
+    } 
+    // Try to get from multiplayer session
+    else if (multiplayerSession?.cartelaId) {
+      cartelaIdToRelease = multiplayerSession.cartelaId;
+    }
+    // Try to get from localStorage
+    else {
+      const storedCardId = localStorage.getItem('currentBingoCardId');
+      if (storedCardId) {
+        // You might need to fetch the cartela ID using the bingo card ID
+        try {
+          const response = await fetch(`/api/game/bingo-card/${storedCardId}`);
+          const data = await response.json();
+          if (data.success && data.cartelaId) {
+            cartelaIdToRelease = data.cartelaId;
+          }
+        } catch (error) {
+          console.error('Error fetching cartela ID:', error);
+        }
+      }
+    }
+
+    if (!cartelaIdToRelease) {
+      console.log('No cartela ID found to release');
+      return;
+    }
+
+    try {
+      console.log('Releasing cartela ID:', cartelaIdToRelease);
+      
+      const response = await fetch('/api/game/cartelas/release', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        },
+        body: JSON.stringify({
+          cartelaId: cartelaIdToRelease,
+          sessionId: multiplayerSession?.sessionId,
+          gameEnded: true
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('✅ Cartela released successfully:', cartelaIdToRelease);
+        cartelaReleasedRef.current = true;
+        
+        // Show a subtle notification
+        const notification = document.createElement('div');
+        notification.style.position = 'fixed';
+        notification.style.bottom = '20px';
+        notification.style.right = '20px';
+        notification.style.background = '#10b981';
+        notification.style.color = 'white';
+        notification.style.padding = '10px 20px';
+        notification.style.borderRadius = '8px';
+        notification.style.zIndex = '10001';
+        notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+        notification.style.animation = 'slideIn 0.3s ease';
+        notification.innerText = '✅ Cartela released and available for others';
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+          notification.style.animation = 'slideOut 0.3s ease';
+          setTimeout(() => document.body.removeChild(notification), 300);
+        }, 3000);
+      } else {
+        console.error('Failed to release cartela:', data.message);
+      }
+    } catch (error) {
+      console.error('Error releasing cartela:', error);
+    }
+  }, [gameState, multiplayerSession]);
 
   // ==================== INITIALIZATION ====================
 
@@ -366,8 +460,13 @@ export default function BingoGame() {
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
       if (autoTimerRef.current) clearInterval(autoTimerRef.current);
       if (synthRef.current) synthRef.current.cancel();
+      
+      // RELEASE CARTELA ON COMPONENT UNMOUNT (if game not already ended)
+      if (!gameEnded && (gameState || multiplayerSession) && !cartelaReleasedRef.current) {
+        releaseCartelaAfterGame();
+      }
     };
-  }, []);
+  }, [gameEnded, gameState, multiplayerSession, releaseCartelaAfterGame, requiresUserInteraction, userInteractedRef]);
 
   // Environment detection
   useEffect(() => {
@@ -422,141 +521,142 @@ export default function BingoGame() {
   }, []);
 
   // Sync called numbers from server
-// Replace your syncCalledNumbers function with this corrected version:
+  const syncCalledNumbers = useCallback(async () => {
+    if (!multiplayerSession?.code) return;
 
-const syncCalledNumbers = useCallback(async () => {
-  if (!multiplayerSession?.code) return;
-
-  try {
-    setConnectionStatus('syncing');
-    
-    const response = await fetch(`/api/game/sessions?code=${multiplayerSession.code}&userId=${gameState?.user?.id}`);
-    const data = await response.json();
-
-    if (data.success && data.session) {
-      const serverCalled = data.session.calledNumbers || [];
-      setPlayers(data.players || []);
+    try {
+      setConnectionStatus('syncing');
       
-      // CRITICAL FIX: Check if game has ended and show winner announcement for ALL non-winning players
-      if (data.session.isGameFinished || data.session.status === 'finished' || data.session.gameEndedAt) {
-        if (!gameEnded) {
-          console.log('🏁 Game has ended - showing winner announcement');
-          setGameEnded(true);
-          setGameStatus('finished');
-          stopAutoCalling();
-          
-          // Show winner announcement for ALL players (including winner, but we'll filter)
-          if (data.session.winner) {
-            // Check if current user is NOT the winner
-            const isCurrentUserWinner = data.session.winner.userId === gameState?.user?.id;
+      const response = await fetch(`/api/game/sessions?code=${multiplayerSession.code}&userId=${gameState?.user?.id}`);
+      const data = await response.json();
+
+      if (data.success && data.session) {
+        const serverCalled = data.session.calledNumbers || [];
+        setPlayers(data.players || []);
+        
+        // Check if game has ended and show winner announcement for ALL non-winning players
+        if (data.session.isGameFinished || data.session.status === 'finished' || data.session.gameEndedAt) {
+          if (!gameEnded) {
+            console.log('🏁 Game has ended - showing winner announcement');
+            setGameEnded(true);
+            setGameStatus('finished');
+            stopAutoCalling();
             
-            if (!isCurrentUserWinner) {
-              // This is a non-winning player - show the winner announcement popup
-              console.log('📢 Showing winner announcement for non-winning player:', data.session.winner);
+            // RELEASE THE CARTELA WHEN GAME ENDS
+            await releaseCartelaAfterGame();
+            
+            // Show winner announcement for ALL players (including winner, but we'll filter)
+            if (data.session.winner) {
+              // Check if current user is NOT the winner
+              const isCurrentUserWinner = data.session.winner.userId === gameState?.user?.id;
+              
+              if (!isCurrentUserWinner) {
+                // This is a non-winning player - show the winner announcement popup
+                console.log('📢 Showing winner announcement for non-winning player:', data.session.winner);
+                setWinnerAnnouncement({
+                  winner: {
+                    userId: data.session.winner.userId,
+                    username: data.session.winner.username || 'Someone',
+                    cartelaNumber: data.session.winner.cartelaNumber || 'Unknown',
+                    winType: data.session.winner.winType || 'BINGO',
+                    prizeAmount: data.session.winner.prizeAmount,
+                    declaredAt: data.session.winner.declaredAt || new Date().toISOString()
+                  },
+                  gameInfo: {
+                    sessionId: data.session.id,
+                    sessionCode: data.session.code,
+                    playerCount: data.playerCount || players.length,
+                    totalNumbersCalled: data.session.totalNumbersCalled || called.length
+                  },
+                  message: `🏆 ${data.session.winner.username || 'Someone'} won with ${data.session.winner.winType || 'BINGO'}! 🏆`
+                });
+              } else {
+                // Current user IS the winner - their own win popup will show
+                console.log('👑 Current user is the winner - showing win popup instead');
+                // The winner's popup is already shown via declareWinToServer response
+              }
+              
+              // Fetch winner history for everyone
+              fetchWinnerHistory(data.session.id);
+            } else {
+              // No winner data but game ended - show generic message
+              console.log('Game ended but no winner data');
               setWinnerAnnouncement({
                 winner: {
-                  userId: data.session.winner.userId,
-                  username: data.session.winner.username || 'Someone',
-                  cartelaNumber: data.session.winner.cartelaNumber || 'Unknown',
-                  winType: data.session.winner.winType || 'BINGO',
-                  prizeAmount: data.session.winner.prizeAmount,
-                  declaredAt: data.session.winner.declaredAt || new Date().toISOString()
+                  userId: '',
+                  username: 'Someone',
+                  cartelaNumber: 'Unknown',
+                  winType: 'BINGO',
+                  declaredAt: new Date().toISOString()
                 },
                 gameInfo: {
                   sessionId: data.session.id,
                   sessionCode: data.session.code,
-                  playerCount: data.playerCount || players.length,
-                  totalNumbersCalled: data.session.totalNumbersCalled || called.length
+                  playerCount: data.playerCount || players.length
                 },
-                message: `🏆 ${data.session.winner.username || 'Someone'} won with ${data.session.winner.winType || 'BINGO'}! 🏆`
+                message: `🏆 Game Over! Someone won! 🏆`
               });
-            } else {
-              // Current user IS the winner - their own win popup will show
-              console.log('👑 Current user is the winner - showing win popup instead');
-              // The winner's popup is already shown via declareWinToServer response
             }
-            
-            // Fetch winner history for everyone
-            fetchWinnerHistory(data.session.id);
-          } else {
-            // No winner data but game ended - show generic message
-            console.log('Game ended but no winner data');
-            setWinnerAnnouncement({
-              
-              winner: {
-                userId: '',
-                username: 'Someone',
-                cartelaNumber: 'Unknown',
-                winType: 'BINGO',
-                declaredAt: new Date().toISOString()
-              },
-              gameInfo: {
-                sessionId: data.session.id,
-                sessionCode: data.session.code,
-                playerCount: data.playerCount || players.length
-              },
-              message: `🏆 Game Over! Someone won! 🏆`
-            });
           }
         }
-      }
-      
-      // Update game status (only if not finished)
-      if (!data.session.isGameFinished && data.session.status !== 'finished' && !data.session.gameEndedAt) {
-        const serverStatus = data.session.status;
-        let newStatus: 'waiting' | 'countdown' | 'playing' | 'finished' = 'waiting';
         
-        if (serverStatus === 'active') {
-          newStatus = 'playing';
-        } else if (serverStatus === 'countdown') {
-          newStatus = 'countdown';
-          setCountdown(data.session.countdownRemaining || 50);
-        }
-        
-        if (newStatus !== gameStatus && !gameEnded) {
-          setGameStatus(newStatus);
+        // Update game status (only if not finished)
+        if (!data.session.isGameFinished && data.session.status !== 'finished' && !data.session.gameEndedAt) {
+          const serverStatus = data.session.status;
+          let newStatus: 'waiting' | 'countdown' | 'playing' | 'finished' = 'waiting';
           
-          if (newStatus === 'playing' && gameStatus !== 'playing') {
-            console.log('🎮 Game started!');
-            if (!isMuted && isSpeechReady) {
-              speak("Game started! Numbers will be called automatically!");
+          if (serverStatus === 'active') {
+            newStatus = 'playing';
+          } else if (serverStatus === 'countdown') {
+            newStatus = 'countdown';
+            setCountdown(data.session.countdownRemaining || 50);
+          }
+          
+          if (newStatus !== gameStatus && !gameEnded) {
+            setGameStatus(newStatus);
+            
+            if (newStatus === 'playing' && gameStatus !== 'playing') {
+              console.log('🎮 Game started!');
+              if (!isMuted && isSpeechReady) {
+                speak("Game started! Numbers will be called automatically!");
+              }
             }
           }
         }
-      }
-      
-      // Update player ready status
-      const readyState: Record<string, boolean> = {};
-      data.players?.forEach((p: Player) => {
-        readyState[p.user_id] = p.player_status === 'ready' || p.player_status === 'playing';
-      });
-      setPlayersReady(readyState);
-      
-      // Update called numbers if changed and game not ended
-      if (!gameEnded && JSON.stringify(serverCalled) !== JSON.stringify(syncedCalled)) {
-        console.log('Syncing called numbers from server:', serverCalled);
-        setCalled(serverCalled);
-        setSyncedCalled(serverCalled);
         
-        if (serverCalled.length > 0) {
-          const newRecent = [...recentCalls];
-          const lastNum = serverCalled[serverCalled.length - 1];
-          const letter = getLetter(lastNum);
-          newRecent.unshift(`${letter}-${lastNum}`);
-          newRecent.pop();
-          setRecentCalls(newRecent);
+        // Update player ready status
+        const readyState: Record<string, boolean> = {};
+        data.players?.forEach((p: Player) => {
+          readyState[p.user_id] = p.player_status === 'ready' || p.player_status === 'playing';
+        });
+        setPlayersReady(readyState);
+        
+        // Update called numbers if changed and game not ended
+        if (!gameEnded && JSON.stringify(serverCalled) !== JSON.stringify(syncedCalled)) {
+          console.log('Syncing called numbers from server:', serverCalled);
+          setCalled(serverCalled);
+          setSyncedCalled(serverCalled);
+          
+          if (serverCalled.length > 0) {
+            const newRecent = [...recentCalls];
+            const lastNum = serverCalled[serverCalled.length - 1];
+            const letter = getLetter(lastNum);
+            newRecent.unshift(`${letter}-${lastNum}`);
+            newRecent.pop();
+            setRecentCalls(newRecent);
+          }
+          
+          updateCardMatches(serverCalled);
         }
         
-        updateCardMatches(serverCalled);
+        setConnectionStatus('connected');
       }
-      
-      setConnectionStatus('connected');
+    } catch (error) {
+      console.error('Failed to sync called numbers:', error);
+      setConnectionStatus('disconnected');
     }
-  } catch (error) {
-    console.error('Failed to sync called numbers:', error);
-    setConnectionStatus('disconnected');
-  }
-}, [multiplayerSession, gameState, gameStatus, syncedCalled, recentCalls, isMuted, isSpeechReady, gameEnded, fetchWinnerHistory, players.length, called.length]);
+  }, [multiplayerSession, gameState, gameStatus, syncedCalled, recentCalls, isMuted, isSpeechReady, gameEnded, fetchWinnerHistory, players.length, called.length, releaseCartelaAfterGame]);
+
   // Start multiplayer sync
   useEffect(() => {
     if (!multiplayerSession?.code || !multiplayerSession?.sessionId) return;
@@ -681,6 +781,7 @@ const syncCalledNumbers = useCallback(async () => {
       return () => {
         if (autoTimerRef.current) {
           clearInterval(autoTimerRef.current);
+          autoTimerRef.current = null;
         }
       };
     } else {
@@ -783,6 +884,9 @@ const syncCalledNumbers = useCallback(async () => {
           setGameEnded(true);
           stopAutoCalling();
           
+          // RELEASE THE CARTELA AFTER WIN
+          await releaseCartelaAfterGame();
+          
           if (data.winnerAnnouncement) {
             setWinnerAnnouncement(data.winnerAnnouncement);
           }
@@ -800,6 +904,9 @@ const syncCalledNumbers = useCallback(async () => {
           setGameStatus('finished');
           setGameEnded(true);
           stopAutoCalling();
+          
+          // RELEASE THE CARTELA IF GAME ENDED
+          await releaseCartelaAfterGame();
           
           if (data.winner) {
             setWinnerAnnouncement({
@@ -1317,7 +1424,10 @@ const syncCalledNumbers = useCallback(async () => {
     setShowMobileSoundPrompt(false);
   };
 
-  const resetGame = () => {
+  const resetGame = async () => {
+    // RELEASE THE CARTELA BEFORE RESETTING
+    await releaseCartelaAfterGame();
+    
     setCalled([]);
     setIsWinner(false);
     setWinDetails(null);
@@ -1342,12 +1452,18 @@ const syncCalledNumbers = useCallback(async () => {
     if (synthRef.current) {
       synthRef.current.cancel();
     }
+    
+    // Show message that cartela is now available
+    alert('✅ Cartela released and is now available for others to use!');
   };
 
   const handleLeaveGame = async () => {
     if (!confirm('Are you sure you want to leave the game?')) return;
 
     try {
+      // RELEASE THE CARTELA BEFORE LEAVING
+      await releaseCartelaAfterGame();
+      
       if (multiplayerSession?.sessionId && gameState?.user?.id) {
         setConnectionStatus('disconnected');
         
@@ -1500,7 +1616,7 @@ const syncCalledNumbers = useCallback(async () => {
     );
   };
 
-  // ==================== NEW POPUP COMPONENTS ====================
+  // ==================== WINNER ANNOUNCEMENT POPUP ====================
 
   const WinnerAnnouncementPopup = () => {
     if (!winnerAnnouncement) return null;
@@ -1569,7 +1685,10 @@ const syncCalledNumbers = useCallback(async () => {
           </div>
 
           <button
-            onClick={handleContinueToLobby}
+            onClick={async () => {
+              await releaseCartelaAfterGame();
+              handleContinueToLobby();
+            }}
             style={{
               background: 'white',
               color: '#764ba2',
@@ -1584,7 +1703,7 @@ const syncCalledNumbers = useCallback(async () => {
             onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
             onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
           >
-            Continue to Lobby
+            Continue to Lobby (Release Cartela)
           </button>
         </div>
       </div>
@@ -1667,7 +1786,10 @@ const syncCalledNumbers = useCallback(async () => {
           <WinnerHistory />
           
           <button
-            onClick={handleContinueToLobby}
+            onClick={async () => {
+              await releaseCartelaAfterGame();
+              handleContinueToLobby();
+            }}
             style={{
               background: '#3b82f6',
               color: 'white',
@@ -1683,7 +1805,7 @@ const syncCalledNumbers = useCallback(async () => {
             onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
             onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
           >
-            Join New Game
+            Join New Game (Release Cartela)
           </button>
         </div>
       </div>
@@ -1898,7 +2020,10 @@ const syncCalledNumbers = useCallback(async () => {
                 marginTop: '20px'
               }}>
                 <button
-                  onClick={resetGame}
+                  onClick={async () => {
+                    await releaseCartelaAfterGame();
+                    resetGame();
+                  }}
                   style={{
                     background: '#3b82f6',
                     border: 'none',
@@ -1921,9 +2046,11 @@ const syncCalledNumbers = useCallback(async () => {
                 </button>
                 
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    await releaseCartelaAfterGame();
                     setIsWinner(false);
                     setWinDetails(null);
+                    window.location.href = '/game/lobby';
                   }}
                   style={{
                     background: 'rgba(255,255,255,0.3)',
@@ -1943,7 +2070,7 @@ const syncCalledNumbers = useCallback(async () => {
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.3)')}
                 >
                   <span style={{ fontSize: '20px' }}>✕</span>
-                  Close
+                  Close & Release Cartela
                 </button>
               </div>
               
@@ -1953,7 +2080,7 @@ const syncCalledNumbers = useCallback(async () => {
                 color: 'rgba(0,0,0,0.6)',
                 fontStyle: 'italic'
               }}>
-                Your win has been recorded! 🎊
+                Your win has been recorded! Cartela is now available for others. 🎊
               </div>
             </div>
           </div>
@@ -2026,6 +2153,19 @@ const syncCalledNumbers = useCallback(async () => {
                 border: '1px solid #ef4444',
               }}>
                 🏁 Game Ended
+              </div>
+            )}
+
+            {cartelaReleasedRef.current && (
+              <div style={{
+                background: 'rgba(16, 185, 129, 0.2)',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                color: '#10b981',
+                border: '1px solid #10b981',
+              }}>
+                ✅ Cartela Released
               </div>
             )}
           </div>
@@ -2253,6 +2393,22 @@ const syncCalledNumbers = useCallback(async () => {
                 </button>
               </div>
 
+              {/* Cartela Release Status */}
+              {cartelaReleasedRef.current && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '8px',
+                  background: 'rgba(16, 185, 129, 0.2)',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  color: '#10b981',
+                  fontSize: '14px',
+                  border: '1px solid #10b981'
+                }}>
+                  ✅ Cartela released and available for others
+                </div>
+              )}
+
               {/* Winner History (if game ended) */}
               {gameEnded && !isWinner && !winnerAnnouncement && <WinnerHistory />}
 
@@ -2317,6 +2473,28 @@ const syncCalledNumbers = useCallback(async () => {
         @keyframes bounce {
           0%, 100% { transform: translateY(0); }
           50% { transform: translateY(-20px); }
+        }
+        
+        @keyframes slideIn {
+          from {
+            transform: translateX(100px);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+        
+        @keyframes slideOut {
+          from {
+            transform: translateX(0);
+            opacity: 1;
+          }
+          to {
+            transform: translateX(100px);
+            opacity: 0;
+          }
         }
       `}</style>
     </div>

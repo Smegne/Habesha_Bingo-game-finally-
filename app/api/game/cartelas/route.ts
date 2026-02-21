@@ -1,4 +1,4 @@
-// app/api/game/cartelas/route.ts - COMPLETE UPDATED VERSION WITH DETERMINISTIC CARDS
+// app/api/game/cartelas/route.ts - WITH 50-SECOND TEMPORARY HOLD
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/mysql-db';
 
@@ -20,13 +20,11 @@ class SeededRandom {
     this.seed = Math.abs(seed) || 1;
   }
 
-  // Returns a random number between 0 and 1
   next(): number {
     this.seed = (this.seed * 9301 + 49297) % 233280;
     return this.seed / 233280;
   }
 
-  // Returns a random integer between min and max (inclusive)
   nextInt(min: number, max: number): number {
     return Math.floor(this.next() * (max - min + 1)) + min;
   }
@@ -36,11 +34,9 @@ class SeededRandom {
 function generateDeterministicCard(cartelaId: number) {
   console.log('Generating deterministic card for cartela ID:', cartelaId);
   
-  // Use the numeric ID with multiplier for better distribution
   const seedValue = cartelaId * 99991;
   const rng = new SeededRandom(seedValue);
   
-  // BINGO ranges
   const ranges = [
     { min: 1, max: 15, letter: 'B' },
     { min: 16, max: 30, letter: 'I' },
@@ -69,14 +65,12 @@ function generateDeterministicCard(cartelaId: number) {
     }
   };
 
-  // Generate numbers for each column using seeded random
   for (let col = 0; col < 5; col++) {
     const columnNumbers: number[] = [];
     const range = ranges[col];
     const columnKey = range.letter as keyof typeof cardData.columns;
     cardData.columns[columnKey] = [];
 
-    // Generate 5 unique numbers for this column
     while (columnNumbers.length < 5) {
       const randomNum = rng.nextInt(range.min, range.max);
       
@@ -86,10 +80,8 @@ function generateDeterministicCard(cartelaId: number) {
       }
     }
 
-    // Sort numbers in ascending order
     columnNumbers.sort((a, b) => a - b);
 
-    // Add to card
     for (let row = 0; row < 5; row++) {
       const index = row * 5 + col;
       numbers.push(columnNumbers[row]);
@@ -104,7 +96,6 @@ function generateDeterministicCard(cartelaId: number) {
     }
   }
 
-  // Set the center cell as FREE (index 12 in a 5x5 grid)
   numbers[12] = 'FREE';
   cardData.numbers[12] = {
     number: 'FREE',
@@ -115,7 +106,6 @@ function generateDeterministicCard(cartelaId: number) {
     index: 12
   };
   
-  // Update N column to include FREE at the center position
   cardData.columns.N = cardData.columns.N.map((num, idx) => idx === 2 ? 'FREE' : num);
 
   return {
@@ -125,16 +115,14 @@ function generateDeterministicCard(cartelaId: number) {
   };
 }
 
-// Cache for generated cards to avoid regenerating
+// Cache for generated cards
 const cardCache = new Map<number, any>();
 
 function getDeterministicCard(cartelaId: number) {
   if (cardCache.has(cartelaId)) {
-    console.log('Cache hit for cartela:', cartelaId);
     return cardCache.get(cartelaId);
   }
   
-  console.log('Cache miss for cartela:', cartelaId);
   const card = generateDeterministicCard(cartelaId);
   cardCache.set(cartelaId, card);
   return card;
@@ -144,7 +132,7 @@ export async function GET() {
   try {
     console.log('GET /api/game/cartelas - Fetching cartelas with waiting state');
     
-    // Release any expired waiting cartelas first
+    // Release any expired waiting cartelas (older than 50 seconds)
     await db.execute(
       `UPDATE cartela_card 
        SET status = 'available', 
@@ -205,7 +193,6 @@ export async function POST(request: NextRequest) {
     
     const { cartelaId, userId, generatePreview, saveGame, cardData, action } = body;
 
-    // Validate required fields
     if (!cartelaId) {
       return NextResponse.json(
         { success: false, message: 'Cartela ID is required' },
@@ -213,7 +200,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Handle waiting state actions
+    // Handle selecting a cartela for waiting (50-second hold)
     if (action === 'select_for_waiting') {
       if (!userId) {
         return NextResponse.json(
@@ -224,6 +211,7 @@ export async function POST(request: NextRequest) {
       return await handleSelectForWaiting(cartelaId, userId);
     }
 
+    // Handle releasing a waiting cartela (user cancels or leaves)
     if (action === 'release_waiting') {
       if (!userId) {
         return NextResponse.json(
@@ -238,7 +226,6 @@ export async function POST(request: NextRequest) {
     if (generatePreview) {
       console.log('POST /api/game/cartelas - Generating deterministic card for cartelaId:', cartelaId);
       
-      // Check if cartela exists and is available or waiting
       const cartelaArray = await db.query(
         `SELECT id, cartela_number, status, waiting_user_id 
          FROM cartela_card WHERE id = ?`,
@@ -254,7 +241,7 @@ export async function POST(request: NextRequest) {
 
       const cartela = cartelaArray[0];
       
-      // Check if cartela is available or waiting (for preview, we can still generate)
+      // Allow preview even if cartela is waiting (for the user who selected it)
       if (cartela.status === 'in_game') {
         return NextResponse.json(
           { success: false, message: 'Cartela is already in an active game' },
@@ -262,11 +249,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Generate deterministic card based on cartela ID
-      // This will ALWAYS produce the same card for this cartela ID
+      // If cartela is waiting for someone else, don't allow preview
+      if (cartela.status === 'waiting' && cartela.waiting_user_id !== userId) {
+        return NextResponse.json(
+          { success: false, message: 'This cartela is currently selected by another user' },
+          { status: 409 }
+        );
+      }
+
       const deterministicCard = getDeterministicCard(cartelaId);
-      
-      console.log('POST /api/game/cartelas - Deterministic card generated successfully for ID:', cartelaId);
       
       return NextResponse.json({
         success: true,
@@ -282,7 +273,6 @@ export async function POST(request: NextRequest) {
       return await handleSaveGame(cartelaId, userId, cardData);
     }
 
-    console.log('POST /api/game/cartelas - Invalid parameters');
     return NextResponse.json({
       success: false,
       message: 'Invalid request parameters'
@@ -290,7 +280,6 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('POST /api/game/cartelas - Error:', error);
-    
     return NextResponse.json(
       { success: false, message: 'Internal server error: ' + error.message },
       { status: 500 }
@@ -298,13 +287,24 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Handle selecting a cartela for waiting
+// Handle selecting a cartela for waiting - 50 SECOND HOLD ONLY
 async function handleSelectForWaiting(cartelaId: number, userId: string) {
   try {
     const result = await db.transaction(async (tx) => {
-      // Check if cartela is available (not waiting and not in game)
+      // First, release ANY expired waiting cartelas (older than 50 seconds)
+      await tx.execute(
+        `UPDATE cartela_card 
+         SET status = 'available', 
+             waiting_user_id = NULL, 
+             waiting_session_id = NULL,
+             waiting_expires_at = NULL
+         WHERE status = 'waiting' 
+           AND waiting_expires_at < NOW()`
+      );
+
+      // Check current cartela status
       const cartelaCheck = await tx.query(
-        `SELECT id, cartela_number, status, waiting_user_id 
+        `SELECT id, cartela_number, status, waiting_user_id, waiting_expires_at 
          FROM cartela_card 
          WHERE id = ?`,
         [cartelaId]
@@ -316,33 +316,19 @@ async function handleSelectForWaiting(cartelaId: number, userId: string) {
 
       const cartela = cartelaCheck[0];
 
-      // If cartela is waiting, check if it's expired
-      if (cartela.status === 'waiting') {
-        // Release expired waiting cartelas
-        await tx.execute(
-          `UPDATE cartela_card 
-           SET status = 'available', 
-               waiting_user_id = NULL, 
-               waiting_session_id = NULL,
-               waiting_expires_at = NULL
-           WHERE status = 'waiting' 
-             AND waiting_expires_at < NOW()`
-        );
-
-        // Recheck after cleanup
-        const refreshedCheck = await tx.query(
-          `SELECT status FROM cartela_card WHERE id = ?`,
-          [cartelaId]
-        ) as any[];
-
-        if (refreshedCheck[0]?.status !== 'available') {
-          throw new Error('Cartela is already selected by another user');
-        }
-      } else if (cartela.status !== 'available') {
-        throw new Error('Cartela is not available');
+      // If cartela is in_game, cannot select
+      if (cartela.status === 'in_game') {
+        throw new Error('Cartela is already in an active game');
       }
 
-      // Check if user already has a waiting cartela
+      // If cartela is waiting for someone else (and not expired), cannot select
+      if (cartela.status === 'waiting' && 
+          cartela.waiting_user_id !== userId && 
+          new Date(cartela.waiting_expires_at) > new Date()) {
+        throw new Error('This cartela is currently selected by another user');
+      }
+
+      // Check if user already has a waiting cartela (and release it)
       const userWaiting = await tx.query(
         `SELECT id FROM cartela_card 
          WHERE waiting_user_id = ? AND status = 'waiting'`,
@@ -364,17 +350,17 @@ async function handleSelectForWaiting(cartelaId: number, userId: string) {
         // Log cancellation
         await tx.execute(
           `INSERT INTO cartela_waiting_history (cartela_id, user_id, status)
-           VALUES (?, ?, 'cancelled')`,
+           VALUES (?, ?, 'auto_released')`,
           [userWaiting[0].id, userId]
         );
       }
 
-      // Set this cartela as waiting (expires in 5 minutes)
+      // Set this cartela as waiting (expires in 50 SECONDS)
       await tx.execute(
         `UPDATE cartela_card 
          SET status = 'waiting', 
              waiting_user_id = ?,
-             waiting_expires_at = DATE_ADD(NOW(), INTERVAL 5 MINUTE)
+             waiting_expires_at = DATE_ADD(NOW(), INTERVAL 50 SECOND)
          WHERE id = ?`,
         [userId, cartelaId]
       );
@@ -388,8 +374,8 @@ async function handleSelectForWaiting(cartelaId: number, userId: string) {
 
       return { 
         success: true,
-        expiresIn: 300, // 5 minutes in seconds
-        message: 'Cartela selected successfully'
+        expiresIn: 50, // 50 seconds hold time
+        message: 'Cartela selected successfully. You have 50 seconds to start the game.'
       };
     });
 
@@ -404,22 +390,36 @@ async function handleSelectForWaiting(cartelaId: number, userId: string) {
   }
 }
 
-// Handle releasing a waiting cartela
+// Handle releasing a waiting cartela (user cancels or leaves)
 async function handleReleaseWaiting(cartelaId: number, userId: string) {
   try {
     const result = await db.transaction(async (tx) => {
-      // Verify user owns this waiting cartela
+      // Verify user owns this waiting cartela and it's not expired
       const cartela = await tx.query(
-        `SELECT id FROM cartela_card 
+        `SELECT id, waiting_expires_at FROM cartela_card 
          WHERE id = ? AND waiting_user_id = ? AND status = 'waiting'`,
         [cartelaId, userId]
       ) as any[];
 
       if (cartela.length === 0) {
+        // Check if it's expired
+        const expiredCheck = await tx.query(
+          `SELECT id FROM cartela_card 
+           WHERE id = ? AND status = 'available'`,
+          [cartelaId]
+        ) as any[];
+        
+        if (expiredCheck.length > 0) {
+          return { 
+            success: true, 
+            message: 'Cartela selection already expired' 
+          };
+        }
+        
         throw new Error('Cartela not found or you do not have permission');
       }
 
-      // Release the cartela
+      // Release the cartela immediately
       await tx.execute(
         `UPDATE cartela_card 
          SET status = 'available', 
@@ -458,11 +458,11 @@ async function handleReleaseWaiting(cartelaId: number, userId: string) {
 async function handleSaveGame(cartelaId: number, userId: string, cardData: any) {
   try {
     const result = await db.transaction(async (tx) => {
-      // Check cartela status - should be waiting and owned by this user
+      // Check cartela status - should be waiting and owned by this user (and not expired)
       const cartelaCheck = await tx.query(
-        `SELECT id, cartela_number, status, waiting_user_id 
+        `SELECT id, cartela_number, status, waiting_user_id, waiting_expires_at 
          FROM cartela_card 
-         WHERE id = ? AND (status = 'waiting' OR status = 'available')`,
+         WHERE id = ?`,
         [cartelaId]
       ) as any[];
 
@@ -472,16 +472,37 @@ async function handleSaveGame(cartelaId: number, userId: string, cardData: any) 
 
       const cartela = cartelaCheck[0];
 
-      // If cartela is waiting but owned by someone else, prevent use
-      if (cartela.status === 'waiting' && cartela.waiting_user_id !== userId) {
-        throw new Error('This cartela is already selected by another user');
+      // Check if cartela is still in waiting status and owned by this user
+      if (cartela.status !== 'waiting') {
+        throw new Error('Cartela is not in waiting state');
+      }
+
+      if (cartela.waiting_user_id !== userId) {
+        throw new Error('This cartela was selected by another user');
+      }
+
+      // Check if waiting period has expired
+      if (new Date(cartela.waiting_expires_at) < new Date()) {
+        // Auto-release expired cartela
+        await tx.execute(
+          `UPDATE cartela_card 
+           SET status = 'available', 
+               waiting_user_id = NULL, 
+               waiting_session_id = NULL,
+               waiting_expires_at = NULL
+           WHERE id = ?`,
+          [cartelaId]
+        );
+        throw new Error('Your 50-second selection period has expired. Please select again.');
       }
 
       // Update cartela to in_game
       await tx.execute(
         `UPDATE cartela_card 
          SET status = 'in_game', 
-             is_available = FALSE
+             is_available = FALSE,
+             waiting_user_id = NULL,
+             waiting_expires_at = NULL
          WHERE id = ?`,
         [cartelaId]
       );

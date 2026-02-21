@@ -7,7 +7,7 @@ import { persist } from "zustand/middleware";
 // To this:
 const getApiUrl = () => {
   if (typeof window === 'undefined') {
-    return "http://localhost:3000/api";
+    return "https://habeshabingo.devvoltz.com/api";
   }
   
   // Check if we're in Telegram WebApp or regular web
@@ -18,7 +18,7 @@ const getApiUrl = () => {
   // Use current origin for Telegram, localhost for dev
   return isTelegram 
     ? `${window.location.origin}/api`
-    : "http://localhost:3000/api";
+    : "https://habeshabingo.devvoltz.com/api";
 };
 
 const API_URL = getApiUrl();
