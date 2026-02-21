@@ -1,5 +1,4 @@
-// C:\Users\hp\Desktop\finishinggbingo\HB\Habesha_Bingo-game-finally-\lib\telegram\bot.ts
-// Server-side only Telegram bot
+
 import 'server-only'
 import { Telegraf, Markup, Context } from 'telegraf'
 import { message } from 'telegraf/filters'
@@ -864,6 +863,7 @@ async function executeDepositCommand(ctx: any) {
 }
 
 // Balance command execution
+// Balance command execution - UPDATED
 async function executeBalanceCommand(ctx: any) {
   try {
     const user = ctx.from;
@@ -884,11 +884,24 @@ async function executeBalanceCommand(ctx: any) {
       return;
     }
     
+    // Get total approved deposits
+    const approvedDeposits = await db.query(
+      'SELECT COALESCE(SUM(amount), 0) as total FROM deposits WHERE user_id = ? AND status = "approved"',
+      [userData.id]
+    ) as any[];
+    
+    const totalApprovedDeposits = approvedDeposits[0]?.total || 0;
+    
+    // Calculate main balance including approved deposits
+    const mainBalanceWithDeposits = userData.balance + totalApprovedDeposits;
+    
     await ctx.reply(
       `💰 **Your Wallet**\n\n` +
-      `💳 **Main Balance:** *${userData.balance} Birr*\n` +
+      `💳 **Main Balance is:** *${mainBalanceWithDeposits} Birr*\n` +
       `🎁 **Bonus Balance:** *${userData.bonus_balance} Birr*\n` +
-      `🎯 **Total Balance:** *${userData.balance + userData.bonus_balance} Birr*`,
+      `🎯 **Total Balance:** *${mainBalanceWithDeposits + userData.bonus_balance} Birr*\n\n` +
+      `📊 **Statistics:**\n` +
+      `• Total Deposited: ${totalApprovedDeposits} Birr`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
@@ -906,6 +919,7 @@ async function executeBalanceCommand(ctx: any) {
 }
 
 // Withdraw command execution
+// Withdraw command execution - UPDATED
 async function executeWithdrawCommand(ctx: any) {
   try {
     const user = ctx.from;
@@ -926,13 +940,26 @@ async function executeWithdrawCommand(ctx: any) {
       return;
     }
     
+    // Get total approved deposits
+    const approvedDeposits = await db.query(
+      'SELECT COALESCE(SUM(amount), 0) as total FROM deposits WHERE user_id = ? AND status = "approved"',
+      [userData.id]
+    ) as any[];
+    
+    const totalApprovedDeposits = approvedDeposits[0]?.total || 0;
+    
+    // Calculate available balance including approved deposits
+    const availableBalance = userData.balance + totalApprovedDeposits;
+    
     // Set withdraw mode
     updateSession(ctx, { withdrawMode: true });
     
     await ctx.reply(
       `🏧 **Withdraw Funds**\n\n` +
-      `💰 **Available Balance:** *${userData.balance} Birr*\n` +
-      `📝 **Minimum Withdrawal:** 10 Birr\n\n` +
+      `💰 **Available Balance:** *${availableBalance} Birr*\n` +
+      `📝 **Minimum Withdrawal:** 10 Birr\n` +
+      `💳 **Main Balance:** *${userData.balance} Birr*\n` +
+      `📊 **Approved Deposits:** *${totalApprovedDeposits} Birr*\n\n` +
       `**Please send in this format:**\n` +
       `\`\`\`\nAmount\nAccount Number\n\`\`\`\n\n` +
       `**Example:**\n` +
@@ -952,9 +979,12 @@ async function executeWithdrawCommand(ctx: any) {
 }
 
 // Invite command execution
+// Invite command execution - FIXED
 async function executeInviteCommand(ctx: any) {
   try {
     const user = ctx.from;
+    
+    console.log('Executing invite command for user:', user.id);
     
     const isRegistered = await checkUserRegistered(user.id.toString());
     
@@ -965,30 +995,54 @@ async function executeInviteCommand(ctx: any) {
       return;
     }
     
+    // Get user's referral code from database
     const users = await db.query(
-      'SELECT id, referral_code FROM users WHERE telegram_id = ?',
+      'SELECT id, referral_code, username, first_name FROM users WHERE telegram_id = ?',
       [user.id.toString()]
     ) as any[];
     
+    console.log('User query result:', users);
+    
     if (!users || users.length === 0) {
-      await ctx.reply('❌ Error fetching referral info.');
+      console.error('No user found for telegram_id:', user.id);
+      await ctx.reply('❌ Error fetching referral info. Please try again or contact support.');
       return;
     }
     
-    const referralCode = users[0].referral_code;
+    const userData = users[0];
+    const referralCode = userData.referral_code;
+    
+    if (!referralCode) {
+      console.error('User has no referral code:', userData);
+      await ctx.reply('❌ Referral code not found. Please contact support.');
+      return;
+    }
+    
     const botUsername = ctx.botInfo?.username || 'HabeshaBingoBot';
     const referralLink = `https://t.me/${botUsername}?start=${referralCode}`;
+    
+    // Get referral count
+    const referrals = await db.query(
+      'SELECT COUNT(*) as count FROM users WHERE referred_by = ?',
+      [userData.id]
+    ) as any[];
+    
+    const referralCount = referrals[0]?.count || 0;
+    const referralEarnings = referralCount * 10; // 10 Birr per referral
     
     await ctx.reply(
       `👥 **Refer & Earn**\n\n` +
       `🎁 Earn **10 Birr** for each friend who joins!\n\n` +
-      `🔑 **Your Referral Code:** \`${referralCode}\`\n\n` +
-      `📱 **Share this link:**\n${referralLink}`,
+      `🔑 **Your Referral Code:** \`${referralCode}\`\n` +
+      `📊 **Total Referrals:** *${referralCount}*\n` +
+      `💰 **Total Earned:** *${referralEarnings} Birr*\n\n` +
+      `📱 **Share this link:**\n` +
+      `${referralLink}`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '📱 Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join Habesha Bingo!')}` }],
+            [{ text: '📱 Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join Habesha Bingo and win real money! Use my referral code: ' + referralCode)}` }],
             [{ text: '📊 View Referrals', callback_data: 'view_referrals' }],
             [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
           ]
@@ -996,8 +1050,14 @@ async function executeInviteCommand(ctx: any) {
       }
     );
   } catch (error) {
-    console.error('Invite error:', error);
-    await ctx.reply('❌ Error fetching referral info.');
+    console.error('Invite command error:', error);
+    await ctx.reply(
+      '❌ Error fetching referral info. Please try again later.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Try Again', 'menu_invite')],
+        [Markup.button.callback('📋 Main Menu', 'show_menu')]
+      ])
+    );
   }
 }
 
@@ -1638,6 +1698,7 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
 
 // ==================== WITHDRAWAL FUNCTIONS ====================
 
+// Update the processWithdrawal function to check against available balance
 async function processWithdrawal(ctx: any, amount: number, accountNumber: string) {
   try {
     const users = await db.query(
@@ -1650,8 +1711,22 @@ async function processWithdrawal(ctx: any, amount: number, accountNumber: string
       return;
     }
     
-    if (users[0].balance < amount) {
-      await ctx.reply('❌ Insufficient balance.');
+    // Get total approved deposits
+    const approvedDeposits = await db.query(
+      'SELECT COALESCE(SUM(amount), 0) as total FROM deposits WHERE user_id = ? AND status = "approved"',
+      [users[0].id]
+    ) as any[];
+    
+    const totalApprovedDeposits = approvedDeposits[0]?.total || 0;
+    const availableBalance = users[0].balance + totalApprovedDeposits;
+    
+    if (availableBalance < amount) {
+      await ctx.reply(
+        '❌ **Insufficient balance**\n\n' +
+        `Your available balance: *${availableBalance} Birr*\n` +
+        `Requested: *${amount} Birr*`,
+        { parse_mode: 'Markdown' }
+      );
       return;
     }
     
@@ -1666,7 +1741,8 @@ async function processWithdrawal(ctx: any, amount: number, accountNumber: string
       `✅ **Withdrawal Request Submitted!**\n\n` +
       `💰 **Amount:** *${amount} Birr*\n` +
       `📱 **Account:** \`${accountNumber}\`\n` +
-      `⏱️ **Status:** Pending Approval`,
+      `⏱️ **Status:** Pending Approval\n\n` +
+      `You'll be notified once approved.`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
