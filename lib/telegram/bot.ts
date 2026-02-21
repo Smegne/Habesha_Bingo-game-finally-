@@ -1804,10 +1804,7 @@ async function executeWithdrawCommand(ctx: any) {
   }
 }
 
-// Withdraw command
-bot.command('withdraw', async (ctx) => {
-  await executeWithdrawCommand(ctx);
-});
+
 
 // Withdraw command
 bot.command('withdraw', async (ctx) => {
@@ -2037,81 +2034,7 @@ async function executeInviteCommand(ctx: any) {
   }
 }
 
-// Invite command
-bot.command('invite', async (ctx) => {
-  await executeInviteCommand(ctx);
-});
 
-// View referrals callback - FIXED
-bot.action('view_referrals', async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  try {
-    const user = ctx.from;
-    
-    // Get user ID
-    const users = await db.query(
-      'SELECT id FROM users WHERE telegram_id = ?',
-      [user.id.toString()]
-    ) as any[];
-    
-    if (!users || users.length === 0) {
-      await ctx.reply('❌ You are not registered.');
-      return;
-    }
-    
-    const userId = users[0].id;
-    
-    // Get referrals list
-    const referrals = await db.query(
-      'SELECT username, first_name, created_at FROM users WHERE referred_by = ? ORDER BY created_at DESC LIMIT 10',
-      [userId]
-    ) as any[];
-    
-    if (!referrals || referrals.length === 0) {
-      await ctx.reply(
-        '📊 **You haven\'t referred anyone yet.**\n\n' +
-        'Share your referral link to start earning!',
-        {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '👥 Get Referral Link', callback_data: 'menu_invite' }]
-            ]
-          }
-        }
-      );
-      return;
-    }
-    
-    let referralList = '📊 **Your Referrals:**\n\n';
-    referrals.forEach((ref, index) => {
-      const name = ref.first_name || ref.username || 'Anonymous';
-      const date = new Date(ref.created_at).toLocaleDateString();
-      referralList += `${index + 1}. ${name} - ${date}\n`;
-    });
-    
-    if (referrals.length === 10) {
-      referralList += '\n*Showing last 10 referrals*';
-    }
-    
-    await ctx.reply(
-      referralList,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '👥 Back to Referral', callback_data: 'menu_invite' }],
-            [{ text: '📋 Main Menu', callback_data: 'show_menu' }]
-          ]
-        }
-      }
-    );
-  } catch (error) {
-    console.error('View referrals error:', error);
-    await ctx.reply('❌ Error fetching referrals.');
-  }
-});
 
 // Invite command
 bot.command('invite', async (ctx) => {
@@ -2226,10 +2149,6 @@ async function executeInstructionsCommand(ctx: any) {
   );
 }
 
-// Instructions command
-bot.command('instructions', async (ctx) => {
-  await executeInstructionsCommand(ctx);
-});
 
 // Instructions command
 bot.command('instructions', async (ctx) => {
@@ -2314,10 +2233,7 @@ async function executeAboutCommand(ctx: any) {
   );
 }
 
-// About command
-bot.command('about', async (ctx) => {
-  await executeAboutCommand(ctx);
-});
+
 
 // About command
 bot.command('about', async (ctx) => {
@@ -2420,8 +2336,7 @@ bot.command('history', async (ctx) => {
   await executeHistoryCommand(ctx);
 });
 
-// Profile command execution
-// Profile command execution - FIXED
+
 async function executeProfileCommand(ctx: any) {
   try {
     const user = ctx.from;
@@ -2506,10 +2421,6 @@ async function executeProfileCommand(ctx: any) {
   }
 }
 
-// Profile command
-bot.command('profile', async (ctx) => {
-  await executeProfileCommand(ctx);
-});
 
 // Profile command
 bot.command('profile', async (ctx) => {
