@@ -1747,8 +1747,9 @@ async function showPendingWithdrawals(ctx: any) {
 }
 
 // ==================== USER COMMANDS ====================
+// ==================== USER COMMANDS ====================
 
-
+// Withdraw command execution
 async function executeWithdrawCommand(ctx: any) {
   try {
     const user = ctx.from;
@@ -1804,9 +1805,7 @@ async function executeWithdrawCommand(ctx: any) {
   }
 }
 
-
-
-// Withdraw command
+// WITHDRAW COMMAND - ONLY ONE
 bot.command('withdraw', async (ctx) => {
   await executeWithdrawCommand(ctx);
 });
@@ -1959,8 +1958,7 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// Invite command execution
-// Invite command execution - FIXED
+// INVITE COMMAND - FIXED
 async function executeInviteCommand(ctx: any) {
   try {
     const user = ctx.from;
@@ -2034,14 +2032,12 @@ async function executeInviteCommand(ctx: any) {
   }
 }
 
-
-
-// Invite command
+// INVITE COMMAND - ONLY ONE
 bot.command('invite', async (ctx) => {
   await executeInviteCommand(ctx);
 });
 
-// View referrals callback
+// VIEW REFERRALS CALLBACK - ONLY ONE
 bot.action('view_referrals', async (ctx) => {
   await ctx.answerCbQuery();
   
@@ -2112,8 +2108,7 @@ bot.action('view_referrals', async (ctx) => {
   }
 });
 
-// Instructions command execution
-// Instructions command execution - FIXED
+// INSTRUCTIONS COMMAND - FIXED
 async function executeInstructionsCommand(ctx: any) {
   await ctx.reply(
     '📖 **How to Play Habesha Bingo**\n\n' +
@@ -2149,14 +2144,12 @@ async function executeInstructionsCommand(ctx: any) {
   );
 }
 
-
-// Instructions command
+// INSTRUCTIONS COMMAND - ONLY ONE
 bot.command('instructions', async (ctx) => {
   await executeInstructionsCommand(ctx);
 });
 
-// Support command execution
-// Support command execution - FIXED
+// SUPPORT COMMAND - FIXED
 async function executeSupportCommand(ctx: any) {
   const user = ctx.from;
   const userData = await getUserData(user.id.toString());
@@ -2189,18 +2182,12 @@ async function executeSupportCommand(ctx: any) {
   );
 }
 
-// Support command
+// SUPPORT COMMAND - ONLY ONE
 bot.command('support', async (ctx) => {
   await executeSupportCommand(ctx);
 });
 
-// Support command
-bot.command('support', async (ctx) => {
-  await executeSupportCommand(ctx);
-});
-
-// About command execution
-// About command execution - FIXED
+// ABOUT COMMAND - FIXED
 async function executeAboutCommand(ctx: any) {
   await ctx.reply(
     'ℹ️ **About Habesha Bingo**\n\n' +
@@ -2233,9 +2220,7 @@ async function executeAboutCommand(ctx: any) {
   );
 }
 
-
-
-// About command
+// ABOUT COMMAND - ONLY ONE
 bot.command('about', async (ctx) => {
   await executeAboutCommand(ctx);
 });
@@ -2331,12 +2316,12 @@ async function executeHistoryCommand(ctx: any) {
   }
 }
 
-// History command
+// HISTORY COMMAND - ONLY ONE
 bot.command('history', async (ctx) => {
   await executeHistoryCommand(ctx);
 });
 
-
+// PROFILE COMMAND - FIXED
 async function executeProfileCommand(ctx: any) {
   try {
     const user = ctx.from;
@@ -2421,8 +2406,7 @@ async function executeProfileCommand(ctx: any) {
   }
 }
 
-
-// Profile command
+// PROFILE COMMAND - ONLY ONE
 bot.command('profile', async (ctx) => {
   await executeProfileCommand(ctx);
 });
@@ -2447,6 +2431,7 @@ bot.catch((err: any, ctx: Context) => {
     }
   ).catch(e => console.error('Failed to send error message:', e));
 });
+ 
 
 // Start bot
 export async function startBot() {
