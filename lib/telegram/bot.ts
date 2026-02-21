@@ -522,6 +522,18 @@ async function executeBalanceCommand(ctx: any) {
     const pendingDepositTotal = pendingDeposits[0]?.total || 0;
     const pendingWithdrawalTotal = pendingWithdrawals[0]?.total || 0;
     
+    // Get approved deposits total
+    const approvedDeposits = await db.query(
+      'SELECT COALESCE(SUM(amount), 0) as total FROM deposits WHERE user_id = ? AND status = "approved"',
+      [userData.id]
+    ) as any[];
+    
+    // Get approved withdrawals total
+    const approvedWithdrawals = await db.query(
+      'SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE user_id = ? AND status = "approved"',
+      [userData.id]
+    ) as any[];
+    
     await ctx.reply(
       `💰 **Your Wallet**\n\n` +
       `💳 **Main Balance:** *${userData.balance} Birr*\n` +
@@ -530,6 +542,8 @@ async function executeBalanceCommand(ctx: any) {
       `⏳ **Pending Deposits:** *${pendingDepositTotal} Birr*\n` +
       `⏳ **Pending Withdrawals:** *${pendingWithdrawalTotal} Birr*\n\n` +
       `📊 **Statistics:**\n` +
+      `• Total Deposited (Approved): ${approvedDeposits[0]?.total || 0} Birr\n` +
+      `• Total Withdrawn (Approved): ${approvedWithdrawals[0]?.total || 0} Birr\n` +
       `• Member since: ${new Date(userData.created_at).toLocaleDateString()}\n` +
       `• Account type: ${userData.role === 'admin' ? '👑 Admin' : '👤 User'}`,
       {
@@ -972,6 +986,24 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
     
     const userUuid = users[0].id;
     
+    // Check if transaction ref already exists
+    const existingDeposit = await db.query(
+      'SELECT id FROM deposits WHERE transaction_ref = ?',
+      [transactionRef]
+    ) as any[];
+    
+    if (existingDeposit && existingDeposit.length > 0) {
+      await ctx.reply(
+        '❌ **Duplicate Transaction Reference**\n\n' +
+        'This transaction reference has already been used.\n' +
+        'Please check and try again.',
+        Markup.inlineKeyboard([
+          [{ text: '🔄 Try Again', callback_data: 'start_deposit' }]
+        ])
+      );
+      return;
+    }
+    
     // Insert deposit record - screenshot_url can be NULL
     console.log('💾 Inserting deposit record...');
     const insertResult = await db.query(
@@ -1030,8 +1062,6 @@ async function submitDeposit(ctx: any, screenshotUrl: string | null, sourceNote:
     
     if (error.code === 'ER_DUP_ENTRY') {
       errorMessage += 'This transaction reference already exists in our system.\n\n';
-    } else if (error.code === 'ER_NO_REFERENCE') {
-      errorMessage += 'Database connection error.\n\n';
     } else {
       errorMessage += `Error: ${error.message || 'Unknown error'}\n\n`;
     }
@@ -1091,7 +1121,7 @@ async function notifyAdminsOfDeposit(ctx: any, userId: string, amount: number, m
 
 // ==================== ADMIN COMMANDS ====================
 
-// Approve deposit command (admin only)
+// Approve deposit command (admin only) - FIXED VERSION
 bot.command('approve_deposit', async (ctx) => {
   const user = ctx.from;
   
@@ -1111,18 +1141,23 @@ bot.command('approve_deposit', async (ctx) => {
     return;
   }
   
+  console.log(`👑 Admin ${user.id} attempting to approve deposit with ref: ${transactionRef}`);
+  
   try {
     // Start a transaction
     await db.query('START TRANSACTION');
     
-    // Get deposit details
+    // Get deposit details - LOCK THE ROW FOR UPDATE to prevent race conditions
     const deposits = await db.query(
-      `SELECT d.*, u.telegram_id, u.username, u.first_name 
+      `SELECT d.*, u.id as user_uuid, u.telegram_id, u.username, u.first_name, u.balance 
        FROM deposits d 
        JOIN users u ON d.user_id = u.id 
-       WHERE d.transaction_ref = ? AND d.status = 'pending'`,
+       WHERE d.transaction_ref = ? AND d.status = 'pending'
+       FOR UPDATE`,
       [transactionRef]
     ) as any[];
+    
+    console.log('📊 Deposit lookup result:', deposits);
     
     if (!deposits || deposits.length === 0) {
       await db.query('ROLLBACK');
@@ -1131,8 +1166,9 @@ bot.command('approve_deposit', async (ctx) => {
     }
     
     const deposit = deposits[0];
+    console.log('✅ Found deposit:', { id: deposit.id, amount: deposit.amount, user_id: deposit.user_uuid });
     
-    // Get admin user ID
+    // Get admin user ID from database
     const admins = await db.query(
       'SELECT id FROM users WHERE telegram_id = ?',
       [user.id.toString()]
@@ -1147,23 +1183,57 @@ bot.command('approve_deposit', async (ctx) => {
     const adminId = admins[0].id;
     
     // Update deposit status to approved
-    await db.query(
+    const updateDepositResult = await db.query(
       `UPDATE deposits 
        SET status = 'approved', approved_by = ?, approved_at = NOW() 
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'pending'`,
       [adminId, deposit.id]
     );
     
+    console.log('📝 Deposit update result:', updateDepositResult);
+    
+    // Check if deposit was updated
+    if (updateDepositResult.affectedRows === 0) {
+      await db.query('ROLLBACK');
+      await ctx.reply('❌ Failed to update deposit status. It may have been already processed.');
+      return;
+    }
+    
+    // Get current user balance before update
+    const userBeforeUpdate = await db.query(
+      'SELECT balance FROM users WHERE id = ?',
+      [deposit.user_uuid]
+    ) as any[];
+    
+    console.log('💰 User balance before update:', userBeforeUpdate[0]?.balance);
+    
     // Update user balance (add deposit amount)
-    await db.query(
+    const updateBalanceResult = await db.query(
       `UPDATE users 
        SET balance = balance + ?, updated_at = NOW() 
        WHERE id = ?`,
-      [deposit.amount, deposit.user_id]
+      [deposit.amount, deposit.user_uuid]
     );
+    
+    console.log('📝 Balance update result:', updateBalanceResult);
+    
+    if (updateBalanceResult.affectedRows === 0) {
+      await db.query('ROLLBACK');
+      await ctx.reply('❌ Failed to update user balance.');
+      return;
+    }
+    
+    // Get new balance after update
+    const userAfterUpdate = await db.query(
+      'SELECT balance FROM users WHERE id = ?',
+      [deposit.user_uuid]
+    ) as any[];
+    
+    console.log('💰 User balance after update:', userAfterUpdate[0]?.balance);
     
     // Commit transaction
     await db.query('COMMIT');
+    console.log('✅ Transaction committed successfully');
     
     // Notify user
     try {
@@ -1173,9 +1243,11 @@ bot.command('approve_deposit', async (ctx) => {
         `💰 Amount: *${deposit.amount} Birr*\n` +
         `🔑 Transaction Ref: \`${deposit.transaction_ref}\`\n` +
         `📱 Method: ${deposit.method}\n\n` +
-        `Your balance has been updated. Use /balance to check.`,
+        `Your balance has been updated. New balance: *${userAfterUpdate[0]?.balance} Birr*\n\n` +
+        `Use /balance to check.`,
         { parse_mode: 'Markdown' }
       );
+      console.log(`✅ User ${deposit.telegram_id} notified`);
     } catch (e) {
       console.error('Failed to notify user:', e);
     }
@@ -1184,15 +1256,19 @@ bot.command('approve_deposit', async (ctx) => {
       `✅ **Deposit Approved!**\n\n` +
       `💰 Amount: ${deposit.amount} Birr\n` +
       `👤 User: ${deposit.first_name} (@${deposit.username || 'N/A'})\n` +
-      `🔑 Transaction Ref: \`${deposit.transaction_ref}\`\n\n` +
+      `🔑 Transaction Ref: \`${deposit.transaction_ref}\`\n` +
+      `💳 New Balance: ${userAfterUpdate[0]?.balance} Birr\n\n` +
       `User has been notified.`,
       { parse_mode: 'Markdown' }
     );
     
   } catch (error) {
     await db.query('ROLLBACK');
-    console.error('Approve deposit error:', error);
-    await ctx.reply('❌ Error approving deposit. Please try again.');
+    console.error('❌ Approve deposit error:', error);
+    await ctx.reply(
+      `❌ Error approving deposit: ${error.message || 'Unknown error'}\n\n` +
+      'Please check the logs and try again.'
+    );
   }
 });
 
@@ -1290,18 +1366,23 @@ bot.command('approve_withdrawal', async (ctx) => {
     return;
   }
   
+  console.log(`👑 Admin ${user.id} attempting to approve withdrawal ID: ${withdrawalId}`);
+  
   try {
     // Start a transaction
     await db.query('START TRANSACTION');
     
-    // Get withdrawal details
+    // Get withdrawal details with FOR UPDATE lock
     const withdrawals = await db.query(
-      `SELECT w.*, u.telegram_id, u.username, u.first_name, u.balance 
+      `SELECT w.*, u.id as user_uuid, u.telegram_id, u.username, u.first_name, u.balance 
        FROM withdrawals w 
        JOIN users u ON w.user_id = u.id 
-       WHERE w.id = ? AND w.status = 'pending'`,
+       WHERE w.id = ? AND w.status = 'pending'
+       FOR UPDATE`,
       [withdrawalId]
     ) as any[];
+    
+    console.log('📊 Withdrawal lookup result:', withdrawals);
     
     if (!withdrawals || withdrawals.length === 0) {
       await db.query('ROLLBACK');
@@ -1310,14 +1391,16 @@ bot.command('approve_withdrawal', async (ctx) => {
     }
     
     const withdrawal = withdrawals[0];
+    console.log('✅ Found withdrawal:', { id: withdrawal.id, amount: withdrawal.amount, user_id: withdrawal.user_uuid, balance: withdrawal.balance });
     
     // Check if user has sufficient balance
     if (withdrawal.balance < withdrawal.amount) {
       await db.query('ROLLBACK');
       await ctx.reply(
-        `❌ Insufficient balance for this withdrawal.\n\n` +
+        `❌ **Insufficient balance for this withdrawal.**\n\n` +
         `User balance: ${withdrawal.balance} Birr\n` +
-        `Withdrawal amount: ${withdrawal.amount} Birr`
+        `Withdrawal amount: ${withdrawal.amount} Birr\n\n` +
+        `Consider rejecting this withdrawal.`
       );
       return;
     }
@@ -1337,23 +1420,48 @@ bot.command('approve_withdrawal', async (ctx) => {
     const adminId = admins[0].id;
     
     // Update withdrawal status to approved
-    await db.query(
+    const updateWithdrawalResult = await db.query(
       `UPDATE withdrawals 
        SET status = 'approved', approved_by = ?, approved_at = NOW() 
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'pending'`,
       [adminId, withdrawal.id]
     );
     
+    console.log('📝 Withdrawal update result:', updateWithdrawalResult);
+    
+    if (updateWithdrawalResult.affectedRows === 0) {
+      await db.query('ROLLBACK');
+      await ctx.reply('❌ Failed to update withdrawal status. It may have been already processed.');
+      return;
+    }
+    
     // Update user balance (subtract withdrawal amount)
-    await db.query(
+    const updateBalanceResult = await db.query(
       `UPDATE users 
        SET balance = balance - ?, updated_at = NOW() 
        WHERE id = ?`,
-      [withdrawal.amount, withdrawal.user_id]
+      [withdrawal.amount, withdrawal.user_uuid]
     );
+    
+    console.log('📝 Balance update result:', updateBalanceResult);
+    
+    if (updateBalanceResult.affectedRows === 0) {
+      await db.query('ROLLBACK');
+      await ctx.reply('❌ Failed to update user balance.');
+      return;
+    }
+    
+    // Get new balance after update
+    const userAfterUpdate = await db.query(
+      'SELECT balance FROM users WHERE id = ?',
+      [withdrawal.user_uuid]
+    ) as any[];
+    
+    console.log('💰 User balance after update:', userAfterUpdate[0]?.balance);
     
     // Commit transaction
     await db.query('COMMIT');
+    console.log('✅ Transaction committed successfully');
     
     // Notify user
     try {
@@ -1363,9 +1471,11 @@ bot.command('approve_withdrawal', async (ctx) => {
         `💰 Amount: *${withdrawal.amount} Birr*\n` +
         `📱 Account: \`${withdrawal.account_number}\`\n\n` +
         `The amount has been sent to your account.\n` +
+        `New balance: *${userAfterUpdate[0]?.balance} Birr*\n\n` +
         `Use /balance to check your updated balance.`,
         { parse_mode: 'Markdown' }
       );
+      console.log(`✅ User ${withdrawal.telegram_id} notified`);
     } catch (e) {
       console.error('Failed to notify user:', e);
     }
@@ -1374,15 +1484,19 @@ bot.command('approve_withdrawal', async (ctx) => {
       `✅ **Withdrawal Approved!**\n\n` +
       `💰 Amount: ${withdrawal.amount} Birr\n` +
       `👤 User: ${withdrawal.first_name} (@${withdrawal.username || 'N/A'})\n` +
-      `📱 Account: \`${withdrawal.account_number}\`\n\n` +
+      `📱 Account: \`${withdrawal.account_number}\`\n` +
+      `💳 New Balance: ${userAfterUpdate[0]?.balance} Birr\n\n` +
       `User has been notified.`,
       { parse_mode: 'Markdown' }
     );
     
   } catch (error) {
     await db.query('ROLLBACK');
-    console.error('Approve withdrawal error:', error);
-    await ctx.reply('❌ Error approving withdrawal. Please try again.');
+    console.error('❌ Approve withdrawal error:', error);
+    await ctx.reply(
+      `❌ Error approving withdrawal: ${error.message || 'Unknown error'}\n\n` +
+      'Please check the logs and try again.'
+    );
   }
 });
 
