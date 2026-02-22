@@ -2,9 +2,6 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 // Change this line:
-
-
-// To this:
 const getApiUrl = () => {
   if (typeof window === 'undefined') {
     return "https://habeshabingo.devvoltz.com/api";
@@ -49,6 +46,7 @@ interface ApiStore {
     totalPages: number;
     totalCards: number;
     hasMore: boolean;
+    isLoading?: boolean;
   } | null;
   
   // Actions
@@ -66,12 +64,14 @@ interface ApiStore {
   markNumber: (number: number) => void;
   checkWin: (gameId: string) => Promise<{ win: boolean; pattern?: string }>;
   loadMoreCards: () => Promise<void>;
+  refreshCardStatus: (cardId: number) => Promise<void>;
   
   // Wallet Actions
   fetchWalletData: () => Promise<void>;
   requestDeposit: (amount: number, method: string, screenshot?: File) => Promise<boolean>;
   requestWithdrawal: (amount: number, method: string, accountNumber: string) => Promise<boolean>;
   convertBonus: () => Promise<boolean>;
+  refreshUserBalance: () => Promise<void>;
   
   // Profile Actions
   fetchProfileData: () => Promise<void>;
@@ -98,35 +98,6 @@ interface ApiStore {
     referralCode?: string,
     email?: string
   ) => Promise<{ success: boolean; message: string }>;
-}
-// In game-store.ts, add this function:
-refreshCardStatus: async (cardId: number) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    
-    const response = await fetch(`${API_URL}/games/cards/${cardId}`, {
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Cache-Control': 'no-cache'
-      },
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      
-      // Update the specific card in availableCards
-      set((state) => ({
-        availableCards: state.availableCards.map(card => 
-          card.id === cardId || card.card_number === cardId
-            ? { ...card, ...data.card, is_used: Boolean(data.card.is_used) }
-            : card
-        ),
-      }));
-    }
-  } catch (error) {
-    console.error('Refresh card status error:', error);
-  }
 }
 
 interface User {
@@ -526,6 +497,40 @@ export const useGameStore = create<ApiStore>()(
         }
       },
       
+      // Refresh user balance from server (sum of base + approved deposits)
+      refreshUserBalance: async () => {
+        try {
+          const token = localStorage.getItem('token');
+          if (!token) return;
+
+          const response = await fetch(`${API_URL}/user/balance`, {
+            headers: { 
+              'Authorization': `Bearer ${token}`,
+              'Cache-Control': 'no-cache'
+            },
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.data) {
+              set((state) => ({
+                user: state.user 
+                  ? { 
+                      ...state.user, 
+                      balance: data.data.totalBalance
+                    }
+                  : null
+              }));
+              console.log('Balance refreshed:', data.data.totalBalance);
+            }
+          } else if (response.status === 401) {
+            get().logout();
+          }
+        } catch (error) {
+          console.error('Refresh balance error:', error);
+        }
+      },
+      
       // Fetch available bingo cards - FIXED VERSION
       fetchAvailableCards: async (gameId?: string, page?: number, limit?: number) => {
         try {
@@ -582,7 +587,7 @@ export const useGameStore = create<ApiStore>()(
             };
             
             set({ 
-              availableCards: parsedCards, // NO 50-CARD LIMIT
+              availableCards: parsedCards,
               cardsPagination: paginationInfo
             });
             
@@ -679,7 +684,37 @@ export const useGameStore = create<ApiStore>()(
         }
       },
       
-      // Select a bingo card
+      // Refresh card status
+      refreshCardStatus: async (cardId: number) => {
+        try {
+          const token = localStorage.getItem('token');
+          if (!token) return;
+          
+          const response = await fetch(`${API_URL}/games/cards/${cardId}`, {
+            headers: { 
+              'Authorization': `Bearer ${token}`,
+              'Cache-Control': 'no-cache'
+            },
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            
+            // Update the specific card in availableCards
+            set((state) => ({
+              availableCards: state.availableCards.map(card => 
+                card.id === cardId || card.card_number === cardId
+                  ? { ...card, ...data.card, is_used: Boolean(data.card.is_used) }
+                  : card
+              ),
+            }));
+          }
+        } catch (error) {
+          console.error('Refresh card status error:', error);
+        }
+      },
+      
+      // Select a bingo card with balance validation
       selectCard: async (cardNumber: number, stake: number) => {
         try {
           const token = localStorage.getItem('token');
@@ -689,8 +724,16 @@ export const useGameStore = create<ApiStore>()(
             console.error('No token or user when selecting card');
             return false;
           }
+
+          // Refresh balance first to ensure we have latest
+          await get().refreshUserBalance();
           
-          if (user.balance < stake) {
+          // Get updated user after refresh
+          const currentUser = get().user;
+          if (!currentUser) return false;
+
+          // Double-check balance against stake
+          if (currentUser.balance < stake) {
             console.error('Insufficient balance');
             return false;
           }
@@ -747,6 +790,7 @@ export const useGameStore = create<ApiStore>()(
                   },
                 });
                 
+                // Deduct stake from balance
                 set((state) => ({
                   user: state.user 
                     ? { 

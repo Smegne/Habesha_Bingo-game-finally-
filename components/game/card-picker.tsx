@@ -1,4 +1,4 @@
-// components/game/card-picker.tsx - UPDATED FOR 50-SECOND HOLD
+// components/game/card-picker.tsx - UPDATED FOR 50-SECOND HOLD WITH BALANCE CHECK
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -81,16 +81,18 @@ interface WaitingCartela {
 }
 
 interface CardPickerProps {
+  stake?: number; // ADDED: stake prop
   onGameStart?: (gameData: any) => void;
 }
 
-const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
+const CardPicker: React.FC<CardPickerProps> = ({ stake = 10, onGameStart }) => { // MODIFIED: added stake prop with default
   // Get state and actions from the store
   const { 
     user: storeUser, 
     isLoggedIn, 
     logout: storeLogout,
-    initializeTelegramAuth
+    initializeTelegramAuth,
+    refreshUserBalance // ADDED: get refreshUserBalance from store
   } = useGameStore();
   
   // Cartela states
@@ -133,6 +135,9 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   const [viewMode, setViewMode] = useState<'grid' | 'compact'>('grid');
   const [showFilters, setShowFilters] = useState<boolean>(false);
   
+  // ADDED: Balance check modal state
+  const [showInsufficientBalanceModal, setShowInsufficientBalanceModal] = useState<boolean>(false);
+  
   // Refs
   const clickSoundRef = useRef<HTMLAudioElement | null>(null);
   const confirmSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -141,6 +146,65 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
   const winnerPollingRef = useRef<NodeJS.Timeout | null>(null);
   const waitingPollingRef = useRef<NodeJS.Timeout | null>(null);
   const cartelaRefreshRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ==================== ADDED: BALANCE CHECK FUNCTION ====================
+  const checkUserBalance = useCallback(async (requiredStake: number): Promise<boolean> => {
+    try {
+      setIsLoading(true);
+      
+      // Refresh balance from server to get latest
+      await refreshUserBalance();
+      
+      const currentUser = useGameStore.getState().user;
+      if (!currentUser) {
+        alert('Please login to continue');
+        setIsLoading(false);
+        return false;
+      }
+      
+      if (currentUser.balance < requiredStake) {
+        // Show detailed error message
+        setShowInsufficientBalanceModal(true);
+        setIsLoading(false);
+        return false;
+      }
+      
+      setIsLoading(false);
+      return true;
+    } catch (error) {
+      console.error('Balance check error:', error);
+      alert('Failed to verify balance. Please try again.');
+      setIsLoading(false);
+      return false;
+    }
+  }, [refreshUserBalance]);
+
+  // ==================== ADDED: STAKE DEDUCTION FUNCTION ====================
+  const deductStakeFromBalance = useCallback(async (amount: number): Promise<boolean> => {
+    try {
+      // Update local state first for UI responsiveness
+      setCurrentUser(prev => prev ? {
+        ...prev,
+        balance: prev.balance - amount
+      } : null);
+
+      // Update store
+      useGameStore.setState((state) => ({
+        user: state.user ? {
+          ...state.user,
+          balance: state.user.balance - amount
+        } : null
+      }));
+
+      // Refresh from server to confirm
+      await refreshUserBalance();
+      
+      return true;
+    } catch (error) {
+      console.error('Error deducting stake:', error);
+      return false;
+    }
+  }, [refreshUserBalance]);
 
   // Initialize and fetch data
   useEffect(() => {
@@ -269,8 +333,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
             setBingoCardNumbers([]);
             setGeneratedCardData(null);
             clearInterval(interval);
-            
-           
             
             // Refresh cartelas to show updated status
             fetchCartelas();
@@ -406,7 +468,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
               setGeneratedCardData(null);
               setWaitingExpiryTime(null);
               
-             
             } else if (updatedMyCartela.waiting_seconds_remaining) {
               // Update expiry time
               setWaitingExpiryTime(updatedMyCartela.waiting_seconds_remaining);
@@ -479,6 +540,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     setSoundEnabled(prev => !prev);
   }, []);
 
+  // ==================== MODIFIED: CARTELA SELECT HANDLER WITH BALANCE CHECK ====================
   const handleCartelaSelect = async (cartela: Cartela) => {
     // Check if cartela is taken by someone else waiting
     if (cartela.status === 'waiting' && cartela.waiting_user_id !== currentUser?.id) {
@@ -487,8 +549,8 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       // Show who has it and how much time left
       const waiterName = cartela.waiting_first_name || cartela.waiting_username || 'Another user';
       const timeLeft = cartela.waiting_seconds_remaining || 0;
-      
-      
+      alert(`⏳ Cartela ${cartela.cartela_number} is currently selected by ${waiterName}. It will become available in ${timeLeft} seconds.`);
+      return;
     }
     
     if (cartela.status === 'in_game') {
@@ -501,6 +563,12 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       alert('Please login to select a cartela');
       checkAuthAndLoadData();
       return;
+    }
+    
+    // ===== ADDED: BALANCE CHECK BEFORE SELECTION =====
+    const hasEnoughBalance = await checkUserBalance(stake);
+    if (!hasEnoughBalance) {
+      return; // Stop selection if insufficient balance
     }
     
     playSound('select');
@@ -547,8 +615,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         setMyWaitingCartela(cartela);
         setWaitingExpiryTime(selectData.expiresIn || 50); // 50 seconds hold time
         
-      
-        
         // Refresh cartelas to show updated status
         fetchCartelas();
       } else {
@@ -587,8 +653,6 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         setWaitingExpiryTime(null);
         playSound('click');
         
-        
-        
         // Refresh cartelas to show updated status
         fetchCartelas();
       } else {
@@ -602,6 +666,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     }
   };
 
+  // ==================== MODIFIED: START GAME WITH BALANCE DEDUCTION ====================
   const startMultiplayerGame = async () => {
     if (!selectedCartela || !generatedCardData || !currentUser) {
       alert('Please select a cartela and login first');
@@ -616,6 +681,12 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       return;
     }
     
+    // ===== ADDED: DOUBLE-CHECK BALANCE BEFORE DEDUCTING =====
+    const hasEnoughBalance = await checkUserBalance(stake);
+    if (!hasEnoughBalance) {
+      return; // Stop if insufficient balance
+    }
+    
     setIsLoading(true);
     playSound('confirm');
     
@@ -623,6 +694,7 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
       console.log('Starting game with:', {
         cartelaId: selectedCartela.id,
         userId: currentUser.id,
+        stake: stake,
         cardData: generatedCardData
       });
       
@@ -653,6 +725,9 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         console.error('Invalid response structure:', data);
         throw new Error('Invalid response from server: missing session data');
       }
+      
+      // ===== ADDED: DEDUCT STAKE FROM BALANCE HERE =====
+      await deductStakeFromBalance(stake);
       
       // Save session info
       localStorage.setItem('currentSession', JSON.stringify(data.session));
@@ -688,6 +763,8 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
         setSelectedCartela(null);
         setMyWaitingCartela(null);
         setWaitingExpiryTime(null);
+      } else if (error.message.includes('balance')) {
+        errorMessage = 'Insufficient balance. Please deposit more funds.';
       }
       
       alert(errorMessage);
@@ -995,6 +1072,66 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     return { bg: 'bg-gray-100', text: 'text-gray-500', hover: '', label: 'Unknown' };
   };
 
+  // ==================== ADDED: INSUFFICIENT BALANCE MODAL ====================
+  const InsufficientBalanceModal = () => {
+    if (!showInsufficientBalanceModal) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+          <div className="text-center mb-4">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <span className="text-3xl">💰</span>
+            </div>
+            <h3 className="text-xl font-bold text-gray-900">Insufficient Balance</h3>
+          </div>
+          
+          <div className="bg-gray-50 rounded-xl p-4 mb-4">
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Your Balance:</span>
+              <span className="font-bold text-red-600">{currentUser?.balance?.toFixed(2) || 0} Birr</span>
+            </div>
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Required Stake:</span>
+              <span className="font-bold text-green-600">{stake} Birr</span>
+            </div>
+            <div className="border-t border-gray-200 my-2 pt-2">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Additional Needed:</span>
+                <span className="font-bold text-orange-600">
+                  {((stake) - (currentUser?.balance || 0)).toFixed(2)} Birr
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <p className="text-sm text-gray-600 mb-4 text-center">
+            You need at least {stake} Birr in your balance to play with this stake.
+            Please deposit more funds to continue.
+          </p>
+          
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setShowInsufficientBalanceModal(false);
+                window.location.href = '/wallet';
+              }}
+              className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-xl transition"
+            >
+              Deposit Now
+            </button>
+            <button
+              onClick={() => setShowInsufficientBalanceModal(false)}
+              className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-3 px-4 rounded-xl transition"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (userLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 via-indigo-800 to-blue-900">
@@ -1019,276 +1156,284 @@ const CardPicker: React.FC<CardPickerProps> = ({ onGameStart }) => {
     );
   }
 
- return (
-  <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-green-100 p-4 md:p-8 relative overflow-hidden">
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-green-100 p-4 md:p-8 relative overflow-hidden">
 
-    {/* Countdown */}
-    {showCountdown && gameSession && currentUser && (
-      <CountdownDisplay
-        sessionCode={gameSession.code}
-        userId={currentUser.id}
-        onGameStart={handleCountdownStart}
-        onCancel={handleCountdownCancel}
-      />
-    )}
+      {/* ADDED: Insufficient Balance Modal */}
+      <InsufficientBalanceModal />
 
-    {/* BINGO Game */}
-    {showBingoGame && bingoGameData && (
-      <div className="fixed inset-0 z-50 bg-white">
-        <BingoGame 
-          initialData={bingoGameData}
-          onClose={handleBingoGameClose}
-          isMultiplayer={true}
-          sessionId={gameSession?.id}
-          userId={currentUser?.id}
+      {/* Countdown */}
+      {showCountdown && gameSession && currentUser && (
+        <CountdownDisplay
+          sessionCode={gameSession.code}
+          userId={currentUser.id}
+          onGameStart={handleCountdownStart}
+          onCancel={handleCountdownCancel}
         />
-      </div>
-    )}
+      )}
 
-    {/* Top Action Buttons */}
-    {currentUser && !showBingoGame && !showCountdown && (
-      <div className="fixed top-4 right-10 z-40 flex gap-3">
-        <button
-          onClick={handleLogout}
-          disabled={isLoading}
-          className="px-4 py-2 bg-red-500 text-white rounded-xl shadow hover:shadow-lg transition disabled:opacity-50"
-        >
-          Logout
-        </button>
-      </div>
-    )}
+      {/* BINGO Game - KEPT AS POPUP */}
+      {showBingoGame && bingoGameData && (
+        <div className="fixed inset-0 z-50 bg-white">
+          <BingoGame 
+            initialData={bingoGameData}
+            onClose={handleBingoGameClose}
+            isMultiplayer={true}
+            sessionId={gameSession?.id}
+            userId={currentUser?.id}
+          />
+        </div>
+      )}
 
-    <div className="max-w-7xl mx-auto">
+      {/* Top Action Buttons */}
+      {currentUser && !showBingoGame && !showCountdown && (
+        <div className="fixed top-4 right-10 z-40 flex gap-3">
+          <button
+            onClick={handleLogout}
+            disabled={isLoading}
+            className="px-4 py-2 bg-red-500 text-white rounded-xl shadow hover:shadow-lg transition disabled:opacity-50"
+          >
+            Logout
+          </button>
+        </div>
+      )}
 
-      {!showBingoGame && !showCountdown ? (
-        <>
-          {/* HEADER */}
-          <div className="bg-white rounded-3xl shadow-lg p-6 md:p-8 mb-8 border border-green-100">
-            {currentUser ? (
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                
-                <div>
-                  <h1 className="text-2xl font-bold text-green-700">
-                    Welcome, {currentUser.firstName}
-                  </h1>
+      <div className="max-w-7xl mx-auto">
+
+        {!showBingoGame && !showCountdown ? (
+          <>
+            {/* HEADER */}
+            <div className="bg-white rounded-3xl shadow-lg p-6 md:p-8 mb-8 border border-green-100">
+              {currentUser ? (
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                   
-                </div>
-
-                <div className="flex gap-6">
-                  <div className="bg-green-50 px-4 py-3 rounded-xl">
-                    <p className="text-sm text-green-500">Balance</p>
-                    <p className="font-bold text-green-700">
-                      ETB {currentUser.balance?.toFixed(2) || '0.00'}
+                  <div>
+                    <h1 className="text-2xl font-bold text-green-700">
+                      Welcome, {currentUser.firstName}
+                    </h1>
+                    {/* MODIFIED: Show stake info */}
+                    <p className="text-sm text-gray-500 mt-1">
+                      Stake: {stake} Birr | Win: {stake * 5} Birr
                     </p>
                   </div>
 
-                  
-                </div>
-
-              </div>
-            ) : (
-              <div className="text-center">
-                <h2 className="text-xl font-semibold text-green-700 mb-4">
-                  Login Required
-                </h2>
-                <button
-                  onClick={handleLoginRedirect}
-                  className="px-6 py-3 bg-green-600 text-white rounded-xl shadow hover:shadow-lg transition"
-                >
-                  Login Now
-                </button>
-              </div>
-            )}
-          </div>
-
-         
-          
-
-          {/* MAIN GRID */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-            {/* LEFT - CARTELA SELECTION */}
-            <div className="bg-white rounded-3xl shadow-lg p-6 border border-green-100">
-              <div className="flex justify-between items-center mb-4">
-                
-                
-                {/* Search and filter controls */}
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Search cartela #"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="px-3 py-1 border border-green-200 rounded-lg text-sm"
-                  />
-                  <button
-                    onClick={toggleSortOrder}
-                    className="p-2 bg-green-100 rounded-lg hover:bg-green-200"
-                    title={`Sort ${sortOrder === 'asc' ? 'Ascending' : 'Descending'}`}
-                  >
-                    {sortOrder === 'asc' ? <SortNumericDown /> : <SortNumericUpAlt />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-6 md:grid-cols-8 gap-3 max-h-[400px] overflow-y-auto p-1">
-                {filteredCartelas.map((cartela) => {
-                  const statusStyle = getCartelaStatusDisplay(cartela);
-                  const isMyWaiting = cartela.status === 'waiting' && cartela.waiting_user_id === currentUser?.id;
-                  const isTakenByOther = cartela.status === 'waiting' && !isMyWaiting;
-                  
-                  // Determine if cartela is clickable
-                  const isClickable = 
-                    (cartela.status === 'available') || 
-                    (isMyWaiting) ||
-                    (cartela.status === 'waiting' && cartela.waiting_user_id === currentUser?.id);
-
-                  return (
-                    <div
-                      key={cartela.id}
-                      onClick={() => {
-                        if (isClickable && !isLoading) {
-                          handleCartelaSelect(cartela);
-                        } else if (isTakenByOther) {
-                          // Show who has it and time left
-                          const waiterName = cartela.waiting_first_name || cartela.waiting_username || 'Another user';
-                          alert(`⏳ Cartela ${cartela.cartela_number} is currently selected by ${waiterName}. It will become available in ${cartela.waiting_seconds_remaining || 0} seconds.`);
-                        }
-                      }}
-                      className={`
-                        aspect-square flex flex-col items-center justify-center 
-                        rounded-xl text-sm font-semibold transition-all
-                        ${statusStyle.bg} ${statusStyle.text}
-                        ${isClickable ? 'cursor-pointer hover:scale-105' : 'cursor-not-allowed opacity-75'}
-                        ${selectedCartela?.id === cartela.id ? 'ring-4 ring-green-500 ring-opacity-50 scale-105' : ''}
-                        relative
-                      `}
-                      title={statusStyle.label}
-                    >
-                      <span>{cartela.cartela_number}</span>
-                      
-                      {/* Show timer for waiting cartelas */}
-                      {cartela.status === 'waiting' && cartela.waiting_seconds_remaining && (
-                        <span className="absolute -top-1 -right-1 bg-white rounded-full text-xs px-1 min-w-[20px] text-center shadow">
-                          {cartela.waiting_seconds_remaining}s
-                        </span>
-                      )}
-                      
-                      {/* Icon indicators */}
-                      {cartela.status === 'waiting' && isTakenByOther && (
-                        <ClockFill size={12} className="absolute -bottom-1 -right-1 text-yellow-600" />
-                      )}
-                      {cartela.status === 'in_game' && (
-                        <span className="absolute -bottom-1 -right-1 text-red-500 text-xs">🎮</span>
-                      )}
+                  <div className="flex gap-6">
+                    <div className="bg-green-50 px-4 py-3 rounded-xl">
+                      <p className="text-sm text-green-500">Balance</p>
+                      <p className="font-bold text-green-700">
+                        ETB {currentUser.balance?.toFixed(2) || '0.00'}
+                      </p>
                     </div>
-                  );
-                })}
-              </div>
- {/* ===== SELECTED CARTELA INFO - ALWAYS VISIBLE WHEN CARTELA IS SELECTED ===== */}
-              {selectedCartela && myWaitingCartela && waitingExpiryTime !== null && (
-            <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl shadow-lg p-2 mb-2 text-white">
-              <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              
-                
-                <div className="flex gap-3">
+                  </div>
+
+                </div>
+              ) : (
+                <div className="text-center">
+                  <h2 className="text-xl font-semibold text-green-700 mb-4">
+                    Login Required
+                  </h2>
                   <button
-                    onClick={startMultiplayerGame}
-                    disabled={isLoading || waitingExpiryTime <= 0}
-                    className="px-8 py-4 bg-yellow-400 text-blue-900 rounded-xl font-bold text-lg shadow-lg hover:bg-yellow-300 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                    onClick={handleLoginRedirect}
+                    className="px-6 py-3 bg-green-600 text-white rounded-xl shadow hover:shadow-lg transition"
                   >
-                    {isLoading ? 'Starting...' : '🚀 START GAME NOW'}
-                  </button>
-                  
-                  <button
-                    onClick={releaseCartela}
-                    disabled={isLoading}
-                    className="px-6 py-4 bg-white/20 text-white rounded-xl font-semibold backdrop-blur-sm hover:bg-white/30 transition disabled:opacity-50"
-                  >
-                    Cancel
+                    Login Now
                   </button>
                 </div>
-              </div>
-              
-              {/* Progress bar for time remaining */}
-              <div className="mt-4 w-full bg-white/30 rounded-full h-3">
-                <div 
-                  className="bg-yellow-400 h-3 rounded-full transition-all duration-1000"
-                  style={{ width: `${(waitingExpiryTime / 50) * 100}%` }}
-                ></div>
-              </div>
-            </div>
-          )}
+              )}
             </div>
 
-            {/* RIGHT - PREVIEW */}
-            <div className="bg-white rounded-3xl shadow-lg p-6 border border-green-100">
-              <h3 className="text-xl font-bold text-green-700 mb-6">
-                BINGO Card Preview
-                {selectedCartela && (
-                  <span className="text-sm font-normal text-green-500 ml-2">
-                    (Cartela #{selectedCartela.cartela_number})
-                  </span>
-                )}
-              </h3>
+            {/* MAIN GRID */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
-              <div className="grid grid-cols-5 gap-3">
-                {bingoCardNumbers.length > 0 ? (
-                  bingoCardNumbers.map((num, index) => (
-                    <div
-                      key={index}
-                      className={`
-                        aspect-square flex items-center justify-center rounded-xl font-bold text-lg
-                        ${index === 12
-                          ? 'bg-green-600 text-white'
-                          : index % 5 === 0 ? 'bg-blue-50 text-blue-700'   // B column
-                          : index % 5 === 1 ? 'bg-indigo-50 text-indigo-700' // I column
-                          : index % 5 === 2 ? 'bg-purple-50 text-purple-700' // N column
-                          : index % 5 === 3 ? 'bg-pink-50 text-pink-700'    // G column
-                          : 'bg-orange-50 text-orange-700'                  // O column
-                        }
-                      `}
+              {/* LEFT - CARTELA SELECTION */}
+              <div className="bg-white rounded-3xl shadow-lg p-6 border border-green-100">
+                <div className="flex justify-between items-center mb-4">
+                  
+                  {/* Search and filter controls */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Search cartela #"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="px-3 py-1 border border-green-200 rounded-lg text-sm"
+                    />
+                    <button
+                      onClick={toggleSortOrder}
+                      className="p-2 bg-green-100 rounded-lg hover:bg-green-200"
+                      title={`Sort ${sortOrder === 'asc' ? 'Ascending' : 'Descending'}`}
                     >
-                      {index === 12 ? 'FREE' : num}
+                      {sortOrder === 'asc' ? <SortNumericDown /> : <SortNumericUpAlt />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-6 md:grid-cols-8 gap-3 max-h-[400px] overflow-y-auto p-1">
+                  {filteredCartelas.map((cartela) => {
+                    const statusStyle = getCartelaStatusDisplay(cartela);
+                    const isMyWaiting = cartela.status === 'waiting' && cartela.waiting_user_id === currentUser?.id;
+                    const isTakenByOther = cartela.status === 'waiting' && !isMyWaiting;
+                    
+                    // Determine if cartela is clickable
+                    const isClickable = 
+                      (cartela.status === 'available') || 
+                      (isMyWaiting) ||
+                      (cartela.status === 'waiting' && cartela.waiting_user_id === currentUser?.id);
+
+                    return (
+                      <div
+                        key={cartela.id}
+                        onClick={() => {
+                          if (isClickable && !isLoading) {
+                            handleCartelaSelect(cartela);
+                          } else if (isTakenByOther) {
+                            // Show who has it and time left
+                            const waiterName = cartela.waiting_first_name || cartela.waiting_username || 'Another user';
+                            alert(`⏳ Cartela ${cartela.cartela_number} is currently selected by ${waiterName}. It will become available in ${cartela.waiting_seconds_remaining || 0} seconds.`);
+                          }
+                        }}
+                        className={`
+                          aspect-square flex flex-col items-center justify-center 
+                          rounded-xl text-sm font-semibold transition-all
+                          ${statusStyle.bg} ${statusStyle.text}
+                          ${isClickable ? 'cursor-pointer hover:scale-105' : 'cursor-not-allowed opacity-75'}
+                          ${selectedCartela?.id === cartela.id ? 'ring-4 ring-green-500 ring-opacity-50 scale-105' : ''}
+                          relative
+                        `}
+                        title={statusStyle.label}
+                      >
+                        <span>{cartela.cartela_number}</span>
+                        
+                        {/* Show timer for waiting cartelas */}
+                        {cartela.status === 'waiting' && cartela.waiting_seconds_remaining && (
+                          <span className="absolute -top-1 -right-1 bg-white rounded-full text-xs px-1 min-w-[20px] text-center shadow">
+                            {cartela.waiting_seconds_remaining}s
+                          </span>
+                        )}
+                        
+                        {/* Icon indicators */}
+                        {cartela.status === 'waiting' && isTakenByOther && (
+                          <ClockFill size={12} className="absolute -bottom-1 -right-1 text-yellow-600" />
+                        )}
+                        {cartela.status === 'in_game' && (
+                          <span className="absolute -bottom-1 -right-1 text-red-500 text-xs">🎮</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                {/* ===== SELECTED CARTELA INFO - MODIFIED TO SHOW STAKE ===== */}
+                {selectedCartela && myWaitingCartela && waitingExpiryTime !== null && (
+                  <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl shadow-lg p-2 mt-4 text-white">
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                      
+                      <div className="flex gap-3">
+                        <button
+                          onClick={startMultiplayerGame}
+                          disabled={isLoading || waitingExpiryTime <= 0}
+                          className="px-8 py-4 bg-yellow-400 text-blue-900 rounded-xl font-bold text-lg shadow-lg hover:bg-yellow-300 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                        >
+                          {isLoading ? 'Starting...' : `🚀 START GAME (Pay ${stake} Birr)`}
+                        </button>
+                        
+                        <button
+                          onClick={releaseCartela}
+                          disabled={isLoading}
+                          className="px-6 py-4 bg-white/20 text-white rounded-xl font-semibold backdrop-blur-sm hover:bg-white/30 transition disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="col-span-5 text-center text-green-400 py-12">
-                    Select a cartela to preview your deterministic card
+                    
+                    {/* Progress bar for time remaining */}
+                    <div className="mt-4 w-full bg-white/30 rounded-full h-3">
+                      <div 
+                        className="bg-yellow-400 h-3 rounded-full transition-all duration-1000"
+                        style={{ width: `${(waitingExpiryTime / 50) * 100}%` }}
+                      ></div>
+                    </div>
+                    
+                    {/* ADDED: Stake info */}
+                    <div className="mt-2 text-center text-sm text-white/80">
+                      {stake} Birr will be deducted from your balance when game starts
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Card info */}
-              {selectedCartela && (
-                <div className="mt-6 text-sm text-green-600 text-center border-t border-green-100 pt-4">
-                  <p>✨ This card is permanently assigned to Cartela #{selectedCartela.cartela_number}</p>
-                  <p className="text-xs text-green-400 mt-1">Same card every time you select this cartela</p>
-                </div>
-              )}
-            </div>
-          </div>
+              {/* RIGHT - PREVIEW */}
+              <div className="bg-white rounded-3xl shadow-lg p-6 border border-green-100">
+                <h3 className="text-xl font-bold text-green-700 mb-6">
+                  BINGO Card Preview
+                  {selectedCartela && (
+                    <span className="text-sm font-normal text-green-500 ml-2">
+                      (Cartela #{selectedCartela.cartela_number})
+                    </span>
+                  )}
+                </h3>
 
-          {/* FOOTER */}
-          {currentUser && (
-            <div className="mt-8 bg-white rounded-2xl p-4 border border-green-100 text-green-600 text-sm text-center">
-              Playing as {currentUser.firstName} • Session ID: {currentUser.id?.substring(0, 8)}...
-              {myWaitingCartela && (
-                <span className="ml-2 text-blue-600 font-semibold">
-                  • Cartela #{myWaitingCartela.cartela_number} selected ({waitingExpiryTime}s remaining)
-                </span>
-              )}
+                <div className="grid grid-cols-5 gap-3">
+                  {bingoCardNumbers.length > 0 ? (
+                    bingoCardNumbers.map((num, index) => (
+                      <div
+                        key={index}
+                        className={`
+                          aspect-square flex items-center justify-center rounded-xl font-bold text-lg
+                          ${index === 12
+                            ? 'bg-green-600 text-white'
+                            : index % 5 === 0 ? 'bg-blue-50 text-blue-700'   // B column
+                            : index % 5 === 1 ? 'bg-indigo-50 text-indigo-700' // I column
+                            : index % 5 === 2 ? 'bg-purple-50 text-purple-700' // N column
+                            : index % 5 === 3 ? 'bg-pink-50 text-pink-700'    // G column
+                            : 'bg-orange-50 text-orange-700'                  // O column
+                          }
+                        `}
+                      >
+                        {index === 12 ? 'FREE' : num}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-5 text-center text-green-400 py-12">
+                      Select a cartela to preview your deterministic card
+                    </div>
+                  )}
+                </div>
+
+                {/* Card info - MODIFIED to show stake */}
+                {selectedCartela && (
+                  <div className="mt-6 text-sm text-green-600 text-center border-t border-green-100 pt-4">
+                    <p>✨ This card is permanently assigned to Cartela #{selectedCartela.cartela_number}</p>
+                    <p className="text-xs text-green-400 mt-1">Same card every time you select this cartela</p>
+                    <p className="text-xs font-bold text-blue-600 mt-2">
+                      {stake} Birr will be deducted when you start the game
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </>
-      ) : (
-        <div className="text-center py-20 text-green-600 text-xl font-semibold">
-          Opening BINGO Game...
-        </div>
-      )}
+
+            {/* FOOTER - MODIFIED to show stake */}
+            {currentUser && (
+              <div className="mt-8 bg-white rounded-2xl p-4 border border-green-100 text-green-600 text-sm text-center">
+                Playing as {currentUser.firstName} • Balance: {currentUser.balance?.toFixed(2)} Birr • Stake: {stake} Birr
+                {myWaitingCartela && (
+                  <span className="ml-2 text-blue-600 font-semibold">
+                    • Cartela #{myWaitingCartela.cartela_number} selected ({waitingExpiryTime}s remaining)
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-center py-20 text-green-600 text-xl font-semibold">
+            Opening BINGO Game...
+          </div>
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
 };
 
 export default CardPicker;
